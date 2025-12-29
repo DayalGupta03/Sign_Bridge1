@@ -1,0 +1,408 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Dark institutional theme for SignBridge 3D - medical/emergency aesthetic */
+:root {
+  --background: oklch(0.12 0.01 260);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.16 0.01 260);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.14 0.01 260);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.65 0.18 195);
+  --primary-foreground: oklch(0.12 0.01 260);
+  --secondary: oklch(0.22 0.01 260);
+  --secondary-foreground: oklch(0.9 0 0);
+  --muted: oklch(0.2 0.01 260);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.55 0.15 165);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.25 0.01 260);
+  --input: oklch(0.2 0.01 260);
+  --ring: oklch(0.65 0.18 195);
+  --chart-1: oklch(0.65 0.18 195);
+  --chart-2: oklch(0.55 0.15 165);
+  --chart-3: oklch(0.7 0.12 85);
+  --chart-4: oklch(0.6 0.15 145);
+  --chart-5: oklch(0.55 0.2 25);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.14 0.01 260);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.65 0.18 195);
+  --sidebar-primary-foreground: oklch(0.12 0.01 260);
+  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.25 0.01 260);
+  --sidebar-ring: oklch(0.65 0.18 195);
+}
+
+.dark {
+  --background: oklch(0.12 0.01 260);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.16 0.01 260);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.14 0.01 260);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.65 0.18 195);
+  --primary-foreground: oklch(0.12 0.01 260);
+  --secondary: oklch(0.22 0.01 260);
+  --secondary-foreground: oklch(0.9 0 0);
+  --muted: oklch(0.2 0.01 260);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.55 0.15 165);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.25 0.01 260);
+  --input: oklch(0.2 0.01 260);
+  --ring: oklch(0.65 0.18 195);
+  --chart-1: oklch(0.65 0.18 195);
+  --chart-2: oklch(0.55 0.15 165);
+  --chart-3: oklch(0.7 0.12 85);
+  --chart-4: oklch(0.6 0.15 145);
+  --chart-5: oklch(0.55 0.2 25);
+  --sidebar: oklch(0.14 0.01 260);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.65 0.18 195);
+  --sidebar-primary-foreground: oklch(0.12 0.01 260);
+  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.25 0.01 260);
+  --sidebar-ring: oklch(0.65 0.18 195);
+}
+
+@theme inline {
+  --font-sans: "Inter", "Inter Fallback";
+  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ============================================================================
+   CUSTOM ANIMATIONS - SignBridge 3D
+   ============================================================================
+   
+   These keyframe animations are synchronized with the AI processing states
+   in the ApplicationInterface component. Each animation is optimized for
+   60fps performance using GPU-accelerated properties (transform, opacity).
+   
+   AVATAR STATE ANIMATIONS:
+   - breath: Ambient pulsing when idle
+   - listening-wave: Soft wave scan during audio/video capture
+   - understanding-focus: Focusing effect during AI processing
+   - responding-expand: Outward expansion during response generation
+   - speaking-pulse: Rhythmic pulse during speech/sign output
+   
+   BACKGROUND EFFECTS:
+   - float/float-delayed: Decorative floating orbs
+   - rotate-gradient: Slow rotating conic gradient
+   - scan-line: Vertical scanning effect
+   
+   EMERGENCY MODE:
+   - emergency-pulse: Rapid pulsing for urgent contexts
+   
+   All animations use easing functions for natural motion.
+   ============================================================================ */
+
+/* Breathing ambient glow for avatar space */
+@keyframes breath {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.08);
+  }
+}
+
+/* Listening state - soft wave scan */
+@keyframes listening-wave {
+  0% {
+    transform: scaleX(0.8);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scaleX(1.2);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scaleX(0.8);
+    opacity: 0.4;
+  }
+}
+
+/* Understanding state - focused tightening */
+@keyframes understanding-focus {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: blur(20px);
+  }
+  50% {
+    transform: scale(0.85);
+    filter: blur(10px);
+  }
+}
+
+/* Responding state - outward expansion */
+@keyframes responding-expand {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* Speaking state - rhythmic pulse */
+@keyframes speaking-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  25% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(0.98);
+    opacity: 0.5;
+  }
+  75% {
+    transform: scale(1.03);
+    opacity: 0.7;
+  }
+}
+
+/* Emergency micro-pulse */
+@keyframes emergency-pulse {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Floating orbs */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes float-delayed {
+  0%,
+  100% {
+    transform: translateY(0px) translateX(0px);
+  }
+  33% {
+    transform: translateY(-15px) translateX(10px);
+  }
+  66% {
+    transform: translateY(5px) translateX(-5px);
+  }
+}
+
+/* Scan line for listening */
+@keyframes scan-line {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Radial gradient rotation */
+@keyframes rotate-gradient {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Data particles flowing */
+@keyframes particle-flow {
+  0% {
+    transform: translateY(100%) scale(0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(60%) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(-60%) scale(1);
+  }
+  100% {
+    transform: translateY(-100%) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Subtitle typewriter effect */
+@keyframes typewriter-cursor {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Button depth press */
+@keyframes button-press {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(2px) scale(0.98);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Status pill reactive glow */
+@keyframes pill-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 0 currentColor;
+  }
+  50% {
+    box-shadow: 0 0 20px 5px currentColor;
+  }
+}
+
+.animate-breath {
+  animation: breath 4s ease-in-out infinite;
+}
+
+.animate-listening {
+  animation: listening-wave 2s ease-in-out infinite;
+}
+
+.animate-understanding {
+  animation: understanding-focus 1.5s ease-in-out infinite;
+}
+
+.animate-responding {
+  animation: responding-expand 1s ease-out infinite;
+}
+
+.animate-speaking {
+  animation: speaking-pulse 0.8s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float-delayed 8s ease-in-out infinite;
+}
+
+.animate-scan {
+  animation: scan-line 2s ease-in-out infinite;
+}
+
+.animate-rotate-slow {
+  animation: rotate-gradient 20s linear infinite;
+}
+
+.animate-emergency {
+  animation: emergency-pulse 0.5s ease-in-out infinite;
+}
+
+/* Smooth scroll behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for the interface */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
