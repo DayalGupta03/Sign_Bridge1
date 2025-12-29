@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Emergency Mode Validator",
+  "description": "Validates Emergency Mode functionality including speech-to-text fallback, sign failure handling, network failure caching, and performance requirements under 200ms",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "lib/aiPipelineController.ts"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Validate Emergency Mode functionality:\n⚡ Speech fail → Text fallback works\n🚨 Sign fail → Last known state maintained\n🆘 Network fail → Offline signs cached\n⏱️ All paths <200ms even in fallback\nGenerate emergency mode test suite."
+  }
+}

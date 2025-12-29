@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Accessibility WCAG Auditor",
+  "description": "Audits React components for WCAG 2.1 AA compliance including ARIA labels, color contrast, keyboard navigation, focus indicators, and screen reader compatibility",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "components/**/*.tsx"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Audit this React component for WCAG 2.1 AA compliance:\n✅ ARIA labels on ALL interactive elements\n✅ 4.5:1 color contrast ratios\n✅ Keyboard navigation (Tab, Enter, Escape)\n✅ Focus indicators visible (2px outline)\n✅ Screen reader friendly (role, aria-label)\n✅ No color-only information\nGenerate accessibility test + suggest fixes."
+  }
+}

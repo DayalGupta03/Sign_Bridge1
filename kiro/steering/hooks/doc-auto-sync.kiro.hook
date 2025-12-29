@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Documentation Auto-Sync",
+  "description": "Automatically updates project documentation including README.md, API docs, CHANGELOG.md, and JUDGE_NOTES.md when core library files or application interface are modified. Includes latency metrics and accessibility scores for professional polish.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "lib/**/*.ts",
+      "components/application-interface.tsx"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Update documentation automatically:\n📖 README.md - Feature summary + GIF\n🔗 API docs - OpenAPI spec update\n📋 CHANGELOG.md - Versioned entries\n🎯 JUDGE_NOTES.md - Hackathon highlights\nInclude latency metrics, accessibility scores."
+  }
+}
