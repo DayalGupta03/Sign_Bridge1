@@ -1,0 +1,8 @@
+run_id: 2025-12-29-stt-sign-mediation
+started_at: 2025-12-29T12:02:00+05:30
+finished_at: 2025-12-29T13:35:00+05:30
+summary: "End-to-end STT -> sign detection -> mediation pipeline verified; basic intents observed."
+outcome: stable
+notes:
+  - "Recorded 100 sample sign frames."
+  - "Intent token schema agreed upon."

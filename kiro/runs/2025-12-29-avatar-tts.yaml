@@ -1,0 +1,7 @@
+run_id: 2025-12-29-avatar-tts
+started_at: 2025-12-29T13:36:00+05:30
+finished_at: 2025-12-29T13:55:00+05:30
+summary: "Avatar clip switching with TTS synchronized; preemption tested."
+outcome: demo-ready
+notes:
+  - "No audio clipping during clip transition."

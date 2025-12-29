@@ -1,0 +1,7 @@
+run_id: 2025-12-29-demo-mode
+started_at: 2025-12-29T14:32:00+05:30
+finished_at: 2025-12-29T14:45:00+05:30
+summary: "Full demo mode walkthrough executed using prepared script."
+outcome: ready-for-hackathon
+notes:
+  - "Minor UI timing adjustments scheduled for day 2."
