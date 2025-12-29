@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Avatar Idle & Cache Management",
+  "description": "Monitors avatar components and mediation layer to play render video when avatar is idle, and implement caching for repeated sign language translations in both deaf->hearing and hearing->deaf modes",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "components/AvatarRenderer.tsx",
+      "components/VideoAvatarRenderer.tsx",
+      "lib/mediator.ts",
+      "lib/avatarState.ts",
+      "hooks/useAvatarController.ts"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review the avatar and mediation layer changes. Implement the following features: 1) When the avatar is not performing any actions (idle state), automatically play the render video from public/videos/idle.mp4. 2) For deaf->hearing mode: if a user performs a sign that has already been processed, use cached results instead of reprocessing. 3) For hearing->deaf mode: if the same text/speech input has been processed before, use cached avatar animation/video. Ensure efficient caching mechanism and proper idle state detection."
+  }
+}
