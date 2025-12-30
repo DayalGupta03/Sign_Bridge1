@@ -91,9 +91,26 @@ export function Footer() {
           </motion.div>
 
           <Link href="/team">
-            <Button variant="link" className="text-muted-foreground hover:text-primary transition-colors">
-              Meet the Team
-            </Button>
+            <motion.button
+              className="relative px-6 py-2.5 rounded-xl font-semibold text-sm overflow-hidden group"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 400, damping: 17 }}
+            >
+              {/* Animated gradient border */}
+              <span className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary via-accent to-primary bg-[length:200%_100%] animate-gradient" />
+
+              {/* Inner background */}
+              <span className="absolute inset-[2px] rounded-[10px] bg-card transition-colors duration-300 group-hover:bg-card/80" />
+
+              {/* Glow effect on hover */}
+              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-primary/20 via-accent/20 to-primary/20 blur-xl" />
+
+              {/* Button text */}
+              <span className="relative z-10 bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent bg-[length:200%_100%] animate-gradient">
+                Meet the Team
+              </span>
+            </motion.button>
           </Link>
 
           <p className="text-sm text-muted-foreground">
