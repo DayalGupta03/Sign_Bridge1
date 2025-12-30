@@ -605,7 +605,7 @@ vercel deploy
 
 ---
 
-## 🧪 Current Status & Roadmap
+## 🧪 Current Status
 
 ### ✅ MVP Complete (v1.0)
 
@@ -620,70 +620,29 @@ vercel deploy
 | **Context Switching** | ✅ Complete | Hospital vs Emergency environment themes |
 | **Responsive Design** | ✅ Complete | Mobile, tablet, desktop optimized |
 
-### 🔄 In Progress (v1.5)
-
-| Feature | Status | Target |
-|---------|--------|--------|
-| **3D Avatar** | 🔄 70% | Q1 2026 |
-| **Medical NLP Enhancement** | 🔄 60% | Q1 2026 |
-| **Full ASL Vocabulary** | 🔄 40% | Q2 2026 |
-| **HIPAA Compliance** | 🔄 80% | Q1 2026 |
-| **Testing Suite** | 🔄 50% | Q1 2026 |
-
-### 📋 Planned (v2.0+)
-
-| Feature | Priority | Target |
-|---------|----------|--------|
-| **User Authentication** | High | Q2 2026 |
-| **EHR Integration** | High | Q2 2026 |
-| **Mobile App** | Medium | Q3 2026 |
-| **Multi-language Support** | Medium | Q3 2026 |
-| **Analytics Dashboard** | Low | Q4 2026 |
-| **Offline Mode** | Low | Q4 2026 |
-
-### Development Priorities
-
-#### Phase 1: Production Readiness (Q1 2026)
-- [ ] Complete 3D avatar with full signing capability
-- [ ] Implement HIPAA-compliant data handling
-- [ ] Add comprehensive error handling
-- [ ] Write automated test suite (unit + integration)
-- [ ] Security audit and penetration testing
-
-#### Phase 2: Enterprise Features (Q2 2026)
-- [ ] User authentication and role-based access
-- [ ] Epic/Cerner EHR integration
-- [ ] Admin dashboard for hospital IT
-- [ ] Usage analytics and reporting
-- [ ] Multi-facility support
-
-#### Phase 3: Scale & Expansion (Q3-Q4 2026)
-- [ ] Mobile apps (iOS/Android)
-- [ ] International sign language support (BSL, Auslan, etc.)
-- [ ] Telehealth platform APIs
-- [ ] Advanced medical NLP models
-- [ ] Real-time collaboration features
-
 ---
 
 ## 🤝 Team Vision & Future Expansion
 
-### Current Team
+ Team Members
 
-- **AI/ML Engineering**: Speech recognition, computer vision, NLP
-- **Frontend Development**: Next.js, React, TypeScript, 3D graphics
-- **Healthcare Domain**: Medical terminology, HIPAA compliance
-- **UX/UI Design**: Accessibility, institutional design systems
+Ayush Patel — Full Stack Developer
+🔗 GitHub: https://github.com/
 
-### Hiring Roadmap
+Kanav Kumar — Full Stack Developer
+🔗 GitHub: https://github.com/
 
-As we scale, we're looking for:
+Dayal Gupta — Backend Architect
+🔗 GitHub: https://github.com/
 
-1. **Senior ML Engineer** - Expand sign language recognition to full ASL/ISL vocabulary
-2. **Healthcare Compliance Officer** - Ensure HIPAA/ADA compliance across all features
-3. **3D Graphics Engineer** - Enhance avatar realism and animation quality
-4. **DevOps Engineer** - Scale infrastructure for enterprise deployments
-5. **Clinical Partnerships Manager** - Build relationships with hospital systems
+Pulkit Pandey — AI Engineer
+🔗 GitHub: https://github.com/
+
+Prisha Gupta — Frontend Specialist
+🔗 GitHub: https://github.com/
+
+Thrissha Ar… — UI/UX Designer
+🔗 GitHub: https://github.com/
 
 ### Partnership Opportunities
 
@@ -842,16 +801,6 @@ We welcome contributions! Please:
 
 ## 🏆 Recognition & Achievements
 
-### Hackathon Success
-- 🥇 **Winner** - [Hackathon Name] Healthcare AI Track (2025)
-- 🌟 **Best Innovation** - Accessibility Technology Category
-- 💡 **People's Choice Award** - Most Impactful Solution
-
-### Media Coverage
-- 📰 Featured in [Publication Name]
-- 🎙️ Podcast Interview: [Podcast Name]
-- 📺 Demo at [Conference Name]
-
 ### Technical Achievements
 - ⚡ **<200ms Latency** - Real-time AI processing
 - 🎯 **95%+ Accuracy** - Sign language gesture recognition
@@ -860,48 +809,17 @@ We welcome contributions! Please:
 
 ---
 
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
 ## 🙏 Acknowledgments
 
 ### Technology Partners
 - **Google** - Gemini AI and MediaPipe Hands
-- **Vercel** - Hosting and deployment platform
 - **Next.js Team** - Framework and tooling
 
 ### Inspiration & Support
 - **Deaf Community** - For feedback and guidance on accessibility
 - **Healthcare Professionals** - For domain expertise and validation
 - **Open Source Community** - For the amazing tools and libraries
-
-### Special Thanks
-- Teaching hospitals that participated in beta testing
-- Sign language interpreters who provided training data
-- Accessibility advocates who reviewed our design
-
----
-
-## 📞 Contact & Support
-
-### For Business Inquiries
-- 📧 Email: business@signbridge3d.com
-- 💼 LinkedIn: [Company Page](#)
-- 📅 Schedule Demo: [Calendly Link](#)
-
-### For Technical Support
-- 🐛 Report Issues: [GitHub Issues](https://github.com/yourusername/signbridge-3d/issues)
-- 💬 Community: [Discord Server](#)
-- 📖 Documentation: [Docs Site](#)
-
-### For Partnership Opportunities
-- 🏥 Hospitals: partnerships@signbridge3d.com
-- 🤝 Investors: investors@signbridge3d.com
-- 🔬 Research: research@signbridge3d.com
-
+- 
 ---
 
 <div align="center">
