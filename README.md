@@ -42,7 +42,7 @@ SignBridge provides **instant, private, AI-mediated communication** that:
 
 ## 🎥 Live Demo
 
-> **Note**: Demo screenshots and video coming soon. The application features a cinematic scroll-driven hero section, real-time 3D avatar rendering, and live subtitle overlays.
+> https://youtu.be/iifFHXfSUCo
 
 ### Key Features in Action
 
