@@ -167,7 +167,6 @@ sequenceDiagram
 - **MediaPipe Hands** - Real-time hand tracking for sign language
 - **Web Speech API** - Browser-native speech recognition
 - **Web Speech Synthesis** - Natural text-to-speech output
-- **@react-three/fiber** - 3D rendering for avatar (in progress)
 
 #### Development & Tooling
 - **pnpm** - Fast, disk-efficient package manager
@@ -509,7 +508,6 @@ hooks/
 
 #### 4. 3D Avatar
 **File**: `components/AvatarRenderer.tsx`
-- Three.js rendering (in progress)
 - Lip-sync to speech synthesis
 - Sign language animation playback
 
