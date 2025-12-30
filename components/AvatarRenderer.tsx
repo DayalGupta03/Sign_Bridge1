@@ -19,6 +19,9 @@ import * as THREE from "three"
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js"
 import type { AvatarState } from "@/lib/avatarState"
 import { cn } from "@/lib/utils"
+import { speechSynthesis, type TTSContext } from "@/lib/speech-synthesis"
+import { AvatarIdleStateManager, detectAvatarActivity } from "@/lib/avatarIdleState"
+import { avatarCache } from "@/lib/avatarCache"
 import {
     ISLGloss,
     ISLSign,
@@ -130,10 +133,44 @@ const BONE_NAMES = {
 } as const
 
 // ============================================================================
-// ANIMATION CONSTANTS
+// SPEECH SYNTHESIS AND LIP SYNC CONSTANTS
 // ============================================================================
 
-const UNDERSTANDING_NOD = { AMPLITUDE: 0.12, FREQUENCY: 1.2 }
+// Phoneme to mouth shape mapping for basic lip synchronization
+const PHONEME_TO_MOUTH_SHAPE = {
+    // Vowels - mouth open shapes
+    'A': { openness: 0.8, width: 0.6, roundness: 0.2 }, // "ah" - wide open
+    'E': { openness: 0.6, width: 0.8, roundness: 0.1 }, // "eh" - wide, less open
+    'I': { openness: 0.4, width: 0.9, roundness: 0.0 }, // "ee" - wide smile
+    'O': { openness: 0.7, width: 0.3, roundness: 0.9 }, // "oh" - round
+    'U': { openness: 0.5, width: 0.2, roundness: 1.0 }, // "oo" - small round
+
+    // Consonants - mouth closed/shaped
+    'M': { openness: 0.0, width: 0.4, roundness: 0.0 }, // lips together
+    'B': { openness: 0.0, width: 0.4, roundness: 0.0 }, // lips together
+    'P': { openness: 0.0, width: 0.4, roundness: 0.0 }, // lips together
+    'F': { openness: 0.2, width: 0.6, roundness: 0.0 }, // teeth on lip
+    'V': { openness: 0.2, width: 0.6, roundness: 0.0 }, // teeth on lip
+    'T': { openness: 0.3, width: 0.5, roundness: 0.0 }, // tongue position
+    'D': { openness: 0.3, width: 0.5, roundness: 0.0 }, // tongue position
+    'S': { openness: 0.2, width: 0.7, roundness: 0.0 }, // slight opening
+    'Z': { openness: 0.2, width: 0.7, roundness: 0.0 }, // slight opening
+
+    // Default/rest position
+    'REST': { openness: 0.1, width: 0.4, roundness: 0.0 }
+} as const
+
+// Speech synthesis timing constants
+const SPEECH_SYNTHESIS_TIMING = {
+    PHONEME_DURATION: 120, // Average phoneme duration in ms
+    MOUTH_TRANSITION_SPEED: 0.15, // How fast mouth shapes transition
+    LIP_SYNC_SMOOTHING: 0.25, // Smoothing factor for lip movements
+    SPEECH_DETECTION_THRESHOLD: 0.1 // Minimum audio level to trigger lip sync
+} as const
+
+// ============================================================================
+// ANIMATION CONSTANTS
+// ============================================================================
 const SPEAKING_ANIM = { AMPLITUDE: 0.08, FREQUENCY: 2.0, Y_AMPLITUDE: 0.04 }
 const IDLE_ANIM = { AMPLITUDE: 0.015, FREQUENCY: 0.5 }
 
@@ -582,11 +619,169 @@ interface AvatarRendererProps {
     handPoseTargets?: HandPoseTargets
     activeISLSign?: ISLGloss
     signSequence?: ISLGloss[]  // Phase 3: Sign sequence
+    // Speech synthesis props
+    speechText?: string  // Text to synthesize and lip sync
+    speechContext?: TTSContext  // Hospital or emergency context
+    onSpeechStart?: () => void  // Callback when speech starts
+    onSpeechEnd?: () => void    // Callback when speech ends
+    // Accessibility props
+    'aria-label'?: string
+    'aria-describedby'?: string
+    tabIndex?: number
+    role?: string
 }
 
-export function AvatarRenderer({ avatarState, className, handPoseTargets, activeISLSign, signSequence }: AvatarRendererProps) {
+export function AvatarRenderer({
+    avatarState,
+    className,
+    handPoseTargets,
+    activeISLSign,
+    signSequence,
+    speechText,
+    speechContext = "hospital",
+    onSpeechStart,
+    onSpeechEnd,
+    'aria-label': ariaLabel,
+    'aria-describedby': ariaDescribedBy,
+    tabIndex = 0,
+    role = "img"
+}: AvatarRendererProps) {
+    // Accessibility state management
+    const [statusMessage, setStatusMessage] = useState<string>("")
+    const prevModeRef = useRef(avatarState.mode)
+
+    // Generate dynamic ARIA label based on avatar state
+    const getAriaLabel = (): string => {
+        if (ariaLabel) return ariaLabel
+
+        if (avatarState.isSpeaking) return "Avatar is speaking sign language"
+        if (avatarState.isProcessing) return "Avatar is processing your input"
+        if (avatarState.isListening) return "Avatar is listening for sign language"
+        if (activeISLSign) return `Avatar is signing: ${activeISLSign}`
+        if (signSequence?.length) return `Avatar is signing sequence of ${signSequence.length} signs`
+        return "3D Avatar for sign language communication"
+    }
+
+    // Generate comprehensive description for screen readers
+    const getAriaDescription = (): string => {
+        let description = "Interactive 3D avatar that translates between sign language and speech. "
+        if (speechText) description += `Currently saying: ${speechText}. `
+        if (activeISLSign) description += `Currently signing: ${activeISLSign}. `
+        if (signSequence?.length) description += `Signing sequence of ${signSequence.length} signs. `
+        description += "Use Enter or Space to interact, Escape to stop speech."
+        return description.trim()
+    }
+
+    // Handle keyboard navigation
+    const handleKeyDown = (event: React.KeyboardEvent) => {
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                event.preventDefault()
+                // Focus management - could trigger interaction
+                break
+            case 'Escape':
+                event.preventDefault()
+                // Stop current speech synthesis
+                if (speechText) {
+                    speechSynthesis.cancel()
+                    setStatusMessage("Speech stopped")
+                    setTimeout(() => setStatusMessage(""), 1000)
+                }
+                break
+            case 'p':
+            case 'P':
+                // Pause/Play speech (if active)
+                if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault()
+                    if (speechText) {
+                        speechSynthesis.pause()
+                        setStatusMessage("Speech paused")
+                        setTimeout(() => setStatusMessage(""), 1000)
+                    }
+                }
+                break
+        }
+    }
+
+    // Status announcements for screen readers
+    useEffect(() => {
+        if (avatarState.mode !== prevModeRef.current) {
+            let message = ""
+
+            switch (avatarState.mode) {
+                case 'listening':
+                    message = "Avatar is now listening for sign language"
+                    break
+                case 'processing':
+                    message = "Avatar is processing your input"
+                    break
+                case 'speaking':
+                    message = "Avatar is now speaking"
+                    break
+                case 'idle':
+                    message = "Avatar is ready"
+                    break
+            }
+
+            if (message) {
+                setStatusMessage(message)
+                setTimeout(() => setStatusMessage(""), 1000)
+            }
+
+            prevModeRef.current = avatarState.mode
+        }
+    }, [avatarState.mode])
+
     return (
-        <div className={cn("relative", className)}>
+        <div
+            className={cn(
+                "relative",
+                // Focus indicators for keyboard navigation
+                "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                "focus:border-blue-500 focus:shadow-lg",
+                "transition-all duration-200",
+                // Reduced motion support
+                "motion-reduce:transition-none motion-reduce:animate-none",
+                className
+            )}
+            role={role}
+            aria-label={getAriaLabel()}
+            aria-describedby={ariaDescribedBy || "avatar-description"}
+            aria-live="polite"
+            tabIndex={tabIndex}
+            onKeyDown={handleKeyDown}
+        >
+            {/* Hidden description for screen readers */}
+            <div id="avatar-description" className="sr-only">
+                {getAriaDescription()}
+            </div>
+
+            {/* Status announcements */}
+            <div aria-live="polite" aria-atomic="true" className="sr-only">
+                {statusMessage}
+            </div>
+
+            {/* Speech synthesis controls (hidden but accessible) */}
+            {speechText && (
+                <div className="sr-only" role="region" aria-label="Speech controls">
+                    <button
+                        onClick={() => {
+                            speechSynthesis.cancel()
+                            setStatusMessage("Speech stopped")
+                            setTimeout(() => setStatusMessage(""), 1000)
+                        }}
+                        aria-label={`Stop speaking: ${speechText}`}
+                        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:right-2 focus:z-50 focus:bg-white focus:p-2 focus:border focus:rounded focus:shadow-lg"
+                    >
+                        Stop Speech
+                    </button>
+                    <div aria-live="assertive" aria-atomic="true">
+                        {avatarState.isSpeaking ? `Speaking: ${speechText}` : ''}
+                    </div>
+                </div>
+            )}
+
             <Canvas
                 camera={{
                     fov: 30,
@@ -596,9 +791,19 @@ export function AvatarRenderer({ avatarState, className, handPoseTargets, active
                 }}
                 style={{ width: "100%", height: "100%" }}
                 gl={{ antialias: true }}
+                aria-hidden="true" // Canvas is decorative, description is in aria-describedby
             >
                 <Suspense fallback={null}>
-                    <AvatarScene avatarState={avatarState} handPoseTargets={handPoseTargets} activeISLSign={activeISLSign} signSequence={signSequence} />
+                    <AvatarScene
+                        avatarState={avatarState}
+                        handPoseTargets={handPoseTargets}
+                        activeISLSign={activeISLSign}
+                        signSequence={signSequence}
+                        speechText={speechText}
+                        speechContext={speechContext}
+                        onSpeechStart={onSpeechStart}
+                        onSpeechEnd={onSpeechEnd}
+                    />
                 </Suspense>
             </Canvas>
         </div>
@@ -609,7 +814,25 @@ export function AvatarRenderer({ avatarState, className, handPoseTargets, active
 // AVATAR SCENE
 // ============================================================================
 
-function AvatarScene({ avatarState, handPoseTargets, activeISLSign, signSequence }: { avatarState: AvatarState; handPoseTargets?: HandPoseTargets; activeISLSign?: ISLGloss; signSequence?: ISLGloss[] }) {
+function AvatarScene({
+    avatarState,
+    handPoseTargets,
+    activeISLSign,
+    signSequence,
+    speechText,
+    speechContext,
+    onSpeechStart,
+    onSpeechEnd
+}: {
+    avatarState: AvatarState;
+    handPoseTargets?: HandPoseTargets;
+    activeISLSign?: ISLGloss;
+    signSequence?: ISLGloss[];
+    speechText?: string;
+    speechContext?: TTSContext;
+    onSpeechStart?: () => void;
+    onSpeechEnd?: () => void;
+}) {
     return (
         <>
             <ambientLight intensity={0.8} />
@@ -618,7 +841,16 @@ function AvatarScene({ avatarState, handPoseTargets, activeISLSign, signSequence
             {/* RIM LIGHT for hand separation against dark clothes */}
             <spotLight position={[0, 4, -5]} intensity={2.0} angle={0.5} penumbra={1} color="#ffffff" />
             <pointLight position={[0, 2, 3]} intensity={0.6} />
-            <AvatarModel avatarState={avatarState} handPoseTargets={handPoseTargets} activeISLSign={activeISLSign} signSequence={signSequence} />
+            <AvatarModel
+                avatarState={avatarState}
+                handPoseTargets={handPoseTargets}
+                activeISLSign={activeISLSign}
+                signSequence={signSequence}
+                speechText={speechText}
+                speechContext={speechContext}
+                onSpeechStart={onSpeechStart}
+                onSpeechEnd={onSpeechEnd}
+            />
             <CameraFramer />
             <Environment preset="studio" />
         </>
@@ -687,7 +919,25 @@ function CameraFramer() {
 // AVATAR MODEL
 // ============================================================================
 
-function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence }: { avatarState: AvatarState; handPoseTargets?: HandPoseTargets; activeISLSign?: ISLGloss; signSequence?: ISLGloss[] }) {
+function AvatarModel({
+    avatarState,
+    handPoseTargets,
+    activeISLSign,
+    signSequence,
+    speechText,
+    speechContext = "hospital",
+    onSpeechStart,
+    onSpeechEnd
+}: {
+    avatarState: AvatarState;
+    handPoseTargets?: HandPoseTargets;
+    activeISLSign?: ISLGloss;
+    signSequence?: ISLGloss[];
+    speechText?: string;
+    speechContext?: TTSContext;
+    onSpeechStart?: () => void;
+    onSpeechEnd?: () => void;
+}) {
     const gltf = useGLTF("/models/avatar.glb")
 
     const clonedScene = useMemo(() => {
@@ -743,6 +993,42 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
     const prevSequenceKeyRef = useRef<string | null>(null)  // Semantic change detection
 
     // ========================================================================
+    // SPEECH SYNTHESIS STATE
+    // ========================================================================
+    const speechStateRef = useRef<{
+        isActive: boolean
+        currentText: string
+        startTime: number
+        currentPhoneme: string
+        phonemeStartTime: number
+        utterance: SpeechSynthesisUtterance | null
+    }>({
+        isActive: false,
+        currentText: "",
+        startTime: 0,
+        currentPhoneme: "REST",
+        phonemeStartTime: 0,
+        utterance: null
+    })
+
+    // Mouth morph targets state
+    const mouthStateRef = useRef<{
+        currentShape: typeof PHONEME_TO_MOUTH_SHAPE.REST
+        targetShape: typeof PHONEME_TO_MOUTH_SHAPE.REST
+        transitionStartTime: number
+    }>({
+        currentShape: PHONEME_TO_MOUTH_SHAPE.REST,
+        targetShape: PHONEME_TO_MOUTH_SHAPE.REST,
+        transitionStartTime: 0
+    })
+
+    // Track previous speech text to detect changes
+    const prevSpeechTextRef = useRef<string | undefined>(undefined)
+
+    // Idle state manager for 3D avatar
+    const idleManagerRef = useRef<AvatarIdleStateManager | null>(null)
+
+    // ========================================================================
     // SETUP
     // ========================================================================
 
@@ -778,6 +1064,23 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
         }
 
         console.log("[Avatar] Scaled to", scaledSize.y.toFixed(3), "m")
+
+        // Initialize idle state manager
+        if (!idleManagerRef.current) {
+            idleManagerRef.current = new AvatarIdleStateManager({
+                idleTimeoutMs: 3000, // 3 seconds for 3D avatar
+                transitionDurationMs: 500,
+            })
+
+            idleManagerRef.current.setCallbacks({
+                onIdleStart: () => {
+                    console.log("[3D Avatar] Entering idle state")
+                },
+                onIdleEnd: () => {
+                    console.log("[3D Avatar] Exiting idle state")
+                }
+            })
+        }
 
         const skinnedMeshes: THREE.SkinnedMesh[] = []
         scene.traverse((child: THREE.Object3D) => {
@@ -841,6 +1144,114 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
     }, [clonedScene])
 
     // ========================================================================
+    // SPEECH SYNTHESIS AND LIP SYNC EFFECT
+    // ========================================================================
+    // NOTE: Actual TTS is controlled by application-interface.tsx
+    // This effect ONLY tracks lip-sync state based on the speechText prop
+    // It does NOT call speechSynthesis.speak() or cancel() to avoid conflicts
+    useEffect(() => {
+        // Detect speech text changes for lip-sync tracking
+        if (speechText !== prevSpeechTextRef.current) {
+            prevSpeechTextRef.current = speechText
+
+            // Update lip-sync state (no TTS calls here - handled by application-interface.tsx)
+            if (speechText && speechText.trim().length > 0) {
+                console.log(`[Avatar Lip Sync] Tracking speech: "${speechText}"`)
+
+                speechStateRef.current.currentText = speechText
+                speechStateRef.current.startTime = performance.now()
+                speechStateRef.current.isActive = true
+                speechStateRef.current.currentPhoneme = "REST"
+
+                // Notify parent that lip-sync is starting
+                onSpeechStart?.()
+            } else {
+                // No speech text - ensure mouth returns to rest
+                speechStateRef.current.isActive = false
+                speechStateRef.current.currentPhoneme = "REST"
+                mouthStateRef.current.targetShape = PHONEME_TO_MOUTH_SHAPE.REST
+
+                // Notify parent that lip-sync is ending
+                onSpeechEnd?.()
+            }
+        }
+
+        // Cleanup on unmount - only clean up local state, not TTS
+        return () => {
+            idleManagerRef.current?.destroy()
+        }
+    }, [speechText, speechContext, onSpeechStart, onSpeechEnd])
+
+    // ========================================================================
+    // PHONEME ESTIMATION AND MOUTH SHAPE MAPPING
+    // ========================================================================
+    const estimateCurrentPhoneme = (text: string, elapsedTime: number): string => {
+        if (!text || text.length === 0) return "REST"
+
+        // Simple phoneme estimation based on elapsed time
+        // This is a basic implementation - in production, you'd use more sophisticated
+        // phoneme analysis or integrate with speech synthesis events
+        const avgPhonemeTime = SPEECH_SYNTHESIS_TIMING.PHONEME_DURATION
+        const phonemeIndex = Math.floor(elapsedTime / avgPhonemeTime) % text.length
+        const char = text.charAt(phonemeIndex).toUpperCase()
+
+        // Map character to phoneme (simplified)
+        if (char in PHONEME_TO_MOUTH_SHAPE) {
+            return char as keyof typeof PHONEME_TO_MOUTH_SHAPE
+        }
+
+        // Vowel detection for unmapped characters
+        if ('AEIOU'.includes(char)) {
+            return char as keyof typeof PHONEME_TO_MOUTH_SHAPE
+        }
+
+        // Consonant mapping
+        if ('MBPFVTDSZ'.includes(char)) {
+            return char as keyof typeof PHONEME_TO_MOUTH_SHAPE
+        }
+
+        return "REST"
+    }
+
+    // ========================================================================
+    // MOUTH MORPH TARGET APPLICATION
+    // ========================================================================
+    const applyMouthMorphTargets = (
+        headBone: THREE.Bone | null,
+        targetShape: typeof PHONEME_TO_MOUTH_SHAPE.REST,
+        currentShape: typeof PHONEME_TO_MOUTH_SHAPE.REST,
+        blendFactor: number
+    ) => {
+        if (!headBone) return
+
+        // In a real implementation, this would apply morph targets to the mesh
+        // For now, we'll simulate mouth movement through head bone scaling/rotation
+        // This is a placeholder for actual morph target implementation
+
+        // Interpolate between current and target mouth shape
+        const openness = THREE.MathUtils.lerp(currentShape.openness, targetShape.openness, blendFactor)
+        const width = THREE.MathUtils.lerp(currentShape.width, targetShape.width, blendFactor)
+        const roundness = THREE.MathUtils.lerp(currentShape.roundness, targetShape.roundness, blendFactor)
+
+        // Apply subtle head movements to simulate mouth shapes
+        // This is a simplified approach - real implementation would use facial morph targets
+        const mouthInfluence = 0.02 // Very subtle influence on head movement
+
+        // Openness affects slight jaw drop (head rotation)
+        const jawRotation = openness * mouthInfluence
+        _tempQuat.setFromAxisAngle(X_AXIS, jawRotation)
+
+        // Width affects slight head width (very subtle scaling simulation)
+        // Note: This is a placeholder - real morph targets would affect mesh vertices
+
+        // Store mouth shape for debugging
+        if (frameCountRef.current % 60 === 0 && speechStateRef.current.isActive) {
+            console.log(`[Avatar Lip Sync] Phoneme: ${speechStateRef.current.currentPhoneme}, ` +
+                `Openness: ${openness.toFixed(2)}, Width: ${width.toFixed(2)}, Roundness: ${roundness.toFixed(2)}`)
+        }
+    }
+
+    // ========================================================================
     // ANIMATION LOOP
     // ========================================================================
 
@@ -860,6 +1271,20 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
 
         const isSigningActive = handPoseTargets !== undefined &&
             (handPoseTargets.leftWrist !== undefined || handPoseTargets.rightWrist !== undefined)
+
+        // Detect overall avatar activity for idle state management
+        const isAvatarActive = detectAvatarActivity({
+            isSigningActive,
+            isSpeaking: speechStateRef.current.isActive,
+            hasHandPoses: handPoseTargets !== undefined,
+            signSequence: signSequence || [],
+            speechText: speechText,
+        })
+
+        // Update idle state manager
+        if (isAvatarActive) {
+            idleManagerRef.current?.signalActivity()
+        }
 
         // ====================================================================
         // PHASE 3: SIGN SEQUENCING
@@ -1193,10 +1618,23 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
             }
         }
         // ====================================================================
-        // ARM IK - MEDIAPIPE HAND TRACKING
+        // ARM IK - MEDIAPIPE HAND TRACKING WITH CACHING
         // ====================================================================
         // Only process MediaPipe if NO ISL sign is active
         else if (handPoseTargets) {
+            // Check cache for deaf→hearing mode gesture recognition
+            const gestureKey = avatarCache.generateGestureKey(handPoseTargets)
+            const cachedRecognition = avatarCache.getSignRecognition(gestureKey)
+
+            if (cachedRecognition) {
+                console.log("[3D Avatar] Using cached sign recognition:", cachedRecognition.recognizedSigns)
+                // Use cached recognition result - this would typically trigger speech synthesis
+                // For now, we'll just log it and continue with normal processing
+            }
+
+            // Signal activity to idle manager when hand poses are detected
+            idleManagerRef.current?.signalActivity()
+
             const bounds = avatarBoundsRef.current
 
             // LEFT ARM
@@ -1258,19 +1696,90 @@ function AvatarModel({ avatarState, handPoseTargets, activeISLSign, signSequence
         }
 
         // ====================================================================
-        // HEAD ANIMATION
+        // HEAD ANIMATION AND LIP SYNC
         // ====================================================================
         if (headBoneRef.current && headRestQuatRef.current) {
             let xAngle = 0
             let yAngle = 0
 
-            if (mode === "processing") {
-                xAngle = Math.sin(time * Math.PI * 2 * UNDERSTANDING_NOD.FREQUENCY) * UNDERSTANDING_NOD.AMPLITUDE
-            } else if (mode === "speaking") {
+            // Update speech synthesis and lip sync
+            if (speechStateRef.current.isActive && speechStateRef.current.currentText) {
+                const elapsedTime = time * 1000 - speechStateRef.current.startTime
+
+                // Estimate current phoneme based on elapsed time
+                const estimatedPhoneme = estimateCurrentPhoneme(speechStateRef.current.currentText, elapsedTime)
+
+                // Update phoneme if it changed
+                if (estimatedPhoneme !== speechStateRef.current.currentPhoneme) {
+                    speechStateRef.current.currentPhoneme = estimatedPhoneme
+                    speechStateRef.current.phonemeStartTime = time * 1000
+
+                    // Set new target mouth shape
+                    const newTargetShape = PHONEME_TO_MOUTH_SHAPE[estimatedPhoneme as keyof typeof PHONEME_TO_MOUTH_SHAPE] || PHONEME_TO_MOUTH_SHAPE.REST
+                    mouthStateRef.current.targetShape = newTargetShape
+                    mouthStateRef.current.transitionStartTime = time * 1000
+                }
+
+                // Interpolate mouth shape
+                const transitionElapsed = time * 1000 - mouthStateRef.current.transitionStartTime
+                const transitionProgress = Math.min(transitionElapsed / (SPEECH_SYNTHESIS_TIMING.PHONEME_DURATION * 0.5), 1.0)
+                const blendFactor = SPEECH_SYNTHESIS_TIMING.LIP_SYNC_SMOOTHING * transitionProgress
+
+                // Update current mouth shape
+                mouthStateRef.current.currentShape = {
+                    openness: THREE.MathUtils.lerp(
+                        mouthStateRef.current.currentShape.openness,
+                        mouthStateRef.current.targetShape.openness,
+                        blendFactor
+                    ),
+                    width: THREE.MathUtils.lerp(
+                        mouthStateRef.current.currentShape.width,
+                        mouthStateRef.current.targetShape.width,
+                        blendFactor
+                    ),
+                    roundness: THREE.MathUtils.lerp(
+                        mouthStateRef.current.currentShape.roundness,
+                        mouthStateRef.current.targetShape.roundness,
+                        blendFactor
+                    )
+                }
+
+                // Apply mouth morph targets (placeholder implementation)
+                applyMouthMorphTargets(
+                    headBoneRef.current,
+                    mouthStateRef.current.targetShape,
+                    mouthStateRef.current.currentShape,
+                    blendFactor
+                )
+
+                // Speaking head animation - more pronounced when speaking
                 xAngle = Math.sin(time * Math.PI * 2 * SPEAKING_ANIM.FREQUENCY) * SPEAKING_ANIM.AMPLITUDE
                 yAngle = Math.sin(time * Math.PI * 2 * 0.7) * SPEAKING_ANIM.Y_AMPLITUDE
+
+                // Add subtle mouth-influenced head movement
+                const mouthInfluence = mouthStateRef.current.currentShape.openness * 0.01
+                xAngle += mouthInfluence
+
             } else {
-                xAngle = Math.sin(time * Math.PI * 2 * IDLE_ANIM.FREQUENCY) * IDLE_ANIM.AMPLITUDE
+                // Non-speaking animation modes
+                if (mode === "speaking") {
+                    // Speaking mode without active speech synthesis
+                    xAngle = Math.sin(time * Math.PI * 2 * SPEAKING_ANIM.FREQUENCY) * SPEAKING_ANIM.AMPLITUDE
+                    yAngle = Math.sin(time * Math.PI * 2 * 0.7) * SPEAKING_ANIM.Y_AMPLITUDE
+                } else {
+                    // Default idle animation for all other modes (including processing)
+                    xAngle = Math.sin(time * Math.PI * 2 * IDLE_ANIM.FREQUENCY) * IDLE_ANIM.AMPLITUDE
+                }
+
+                // Return mouth to rest position when not speaking
+                if (!speechStateRef.current.isActive) {
+                    const restTransitionSpeed = 0.05
+                    mouthStateRef.current.currentShape = {
+                        openness: THREE.MathUtils.lerp(mouthStateRef.current.currentShape.openness, PHONEME_TO_MOUTH_SHAPE.REST.openness, restTransitionSpeed),
+                        width: THREE.MathUtils.lerp(mouthStateRef.current.currentShape.width, PHONEME_TO_MOUTH_SHAPE.REST.width, restTransitionSpeed),
+                        roundness: THREE.MathUtils.lerp(mouthStateRef.current.currentShape.roundness, PHONEME_TO_MOUTH_SHAPE.REST.roundness, restTransitionSpeed)
+                    }
+                }
             }
 
             _nodQuat.setFromAxisAngle(X_AXIS, xAngle)

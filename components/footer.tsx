@@ -2,6 +2,9 @@
 
 import { motion } from "framer-motion"
 import { Shield, Lock, Clock } from "lucide-react"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 export function Footer() {
   return (
@@ -86,6 +89,13 @@ export function Footer() {
             </motion.div>
             <span className="font-semibold text-foreground">SignBridge 3D</span>
           </motion.div>
+
+          <Link href="/team">
+            <Button variant="link" className="text-muted-foreground hover:text-primary transition-colors">
+              Meet the Team
+            </Button>
+          </Link>
+
           <p className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} SignBridge 3D. Bridging communication, saving lives.
           </p>
@@ -95,6 +105,4 @@ export function Footer() {
   )
 }
 
-function cn(...classes: (string | undefined | false)[]) {
-  return classes.filter(Boolean).join(" ")
-}
+

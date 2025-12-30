@@ -18,6 +18,8 @@
 
 import { useRef, useEffect, useState, useCallback } from "react"
 import { cn } from "@/lib/utils"
+import { AvatarIdleStateManager, detectAvatarActivity } from "@/lib/avatarIdleState"
+import { avatarCache } from "@/lib/avatarCache"
 
 // ============================================================================
 // CANONICAL FILENAME MAPPING (SOURCE OF TRUTH)
@@ -107,6 +109,33 @@ export function VideoAvatarRenderer({
     // Track last processed sequence to prevent re-processing
     const lastSequenceKeyRef = useRef<string>("")
 
+    // Idle state manager
+    const idleManagerRef = useRef<AvatarIdleStateManager | null>(null)
+
+    // Initialize idle state manager
+    useEffect(() => {
+        idleManagerRef.current = new AvatarIdleStateManager({
+            idleTimeoutMs: 2000, // 2 seconds for video avatar
+            transitionDurationMs: 300,
+        })
+
+        idleManagerRef.current.setCallbacks({
+            onIdleStart: () => {
+                console.log("[VideoAvatar] Entering idle state")
+                if (avatarState !== "signing") {
+                    setAvatarState("idle")
+                }
+            },
+            onIdleEnd: () => {
+                console.log("[VideoAvatar] Exiting idle state")
+            }
+        })
+
+        return () => {
+            idleManagerRef.current?.destroy()
+        }
+    }, [])
+
     // ========================================================================
     // INTENT RESOLUTION
     // ========================================================================
@@ -180,6 +209,9 @@ export function VideoAvatarRenderer({
             setAvatarState("idle")
             onSignComplete?.()
             console.log("[VideoAvatar] Queue empty → IDLE")
+
+            // Signal idle state manager
+            idleManagerRef.current?.forceIdle()
             return
         }
 
@@ -193,7 +225,7 @@ export function VideoAvatarRenderer({
     }, [processQueue])
 
     // ========================================================================
-    // INTERRUPT HANDLING - New speech always wins
+    // INTERRUPT HANDLING - New speech always wins + KEYWORD RESOLUTION
     // ========================================================================
 
     useEffect(() => {
@@ -203,45 +235,129 @@ export function VideoAvatarRenderer({
         if (sequenceKey === lastSequenceKeyRef.current) return
         lastSequenceKeyRef.current = sequenceKey
 
+        // Build transcript from subtitles for keyword matching
+        const transcript = subtitles.slice(-2).join(" ")
+
+        console.log("[VideoAvatar] 📥 Processing signSequence:", signSequence)
+        console.log("[VideoAvatar] 📝 Transcript for matching:", transcript)
+
+        // Check cache first for hearing→deaf mode
+        const cacheKey = avatarCache.generateTextKey(transcript)
+        const cachedAnimation = avatarCache.getAvatarAnimation(cacheKey)
+
+        if (cachedAnimation && cachedAnimation.signSequence.length > 0) {
+            console.log("[VideoAvatar] Using cached animation for:", transcript)
+            // ISLGloss is already a string literal union type, so cast directly
+            signQueueRef.current = cachedAnimation.signSequence as string[]
+            idleManagerRef.current?.signalActivity()
+            stopCurrentSign()
+            processQueue()
+            return
+        }
+
         // INTERRUPT: Stop current playback immediately
         stopCurrentSign()
         signQueueRef.current = []
 
-        // Resolve intents
-        const transcript = subtitles.slice(-2).join(" ")
+        // Resolve intents - handle __TEXT: marker specially
         const validIntents: string[] = []
 
         for (const item of signSequence) {
-            const intent = resolveIntent(item, transcript)
-            if (intent) {
-                validIntents.push(intent)
+            // Special handling for __TEXT: marker
+            // Format: "__TEXT:the actual transcript text"
+            // This carries the transcript directly, avoiding race conditions
+            if (typeof item === 'string' && item.startsWith("__TEXT:")) {
+                const embeddedTranscript = item.substring(7) // Remove "__TEXT:" prefix
+                console.log("[VideoAvatar] 🔍 __TEXT: marker detected, transcript:", embeddedTranscript)
+
+                // Try keyword matching on the embedded transcript
+                if (embeddedTranscript && embeddedTranscript.length > 0) {
+                    const lowerTranscript = embeddedTranscript.toLowerCase()
+                    let matched = false
+
+                    for (const mapping of KEYWORD_TO_INTENT) {
+                        if (mapping.keywords.some(kw => lowerTranscript.includes(kw))) {
+                            console.log(`[VideoAvatar] ✅ Keyword match: "${embeddedTranscript}" → ${mapping.intent}`)
+                            validIntents.push(mapping.intent)
+                            matched = true
+                            break // Only match first keyword to avoid duplicates
+                        }
+                    }
+
+                    if (!matched) {
+                        console.log("[VideoAvatar] ⚠️ No keyword match found for:", embeddedTranscript)
+                        console.log("[VideoAvatar] 📋 Available keywords:", KEYWORD_TO_INTENT.map(m => m.keywords).flat().slice(0, 10).join(", "), "...")
+                    }
+                }
+            } else if (item === "__TRANSCRIPT__") {
+                // Legacy support for old marker format
+                console.log("[VideoAvatar] 🔍 Legacy __TRANSCRIPT__ marker, using subtitles")
+
+                if (transcript && transcript.length > 0) {
+                    const lowerTranscript = transcript.toLowerCase()
+                    for (const mapping of KEYWORD_TO_INTENT) {
+                        if (mapping.keywords.some(kw => lowerTranscript.includes(kw))) {
+                            console.log(`[VideoAvatar] ✅ Keyword match: "${transcript}" → ${mapping.intent}`)
+                            validIntents.push(mapping.intent)
+                            break
+                        }
+                    }
+                }
+            } else {
+                // Regular intent resolution (for direct intents like "THANK_YOU")
+                const intent = resolveIntent(item, transcript)
+                if (intent) {
+                    validIntents.push(intent)
+                }
             }
         }
 
         if (validIntents.length === 0) {
-            console.log("[VideoAvatar] No valid intents from sequence:", signSequence)
+            console.log("[VideoAvatar] ❌ No valid intents from sequence:", signSequence, "transcript:", transcript)
             return
         }
 
+        // Cache the animation result
+        avatarCache.setAvatarAnimation(cacheKey, {
+            text: transcript,
+            signSequence: validIntents as any[],
+            videoPath: undefined,
+        })
+
         // Queue and play
         signQueueRef.current = validIntents
-        console.log(`[VideoAvatar] 🔄 Interrupt! New queue: [${validIntents.join(", ")}]`)
+        console.log(`[VideoAvatar] ▶️ Playing queue: [${validIntents.join(", ")}]`)
+
+        idleManagerRef.current?.signalActivity()
         processQueue()
 
     }, [signSequence, subtitles, resolveIntent, stopCurrentSign, processQueue])
 
     // ========================================================================
-    // IDLE VIDEO CONTROL
+    // IDLE VIDEO CONTROL WITH ACTIVITY DETECTION
     // ========================================================================
 
     useEffect(() => {
         const idleVideo = idleVideoRef.current
         if (!idleVideo) return
 
-        if (avatarState === "idle") {
-            idleVideo.play().catch(() => { })
+        // Detect avatar activity
+        const isActive = detectAvatarActivity({
+            isSigningActive: avatarState === "signing",
+            signSequence: signSequence,
+        })
+
+        if (isActive) {
+            idleManagerRef.current?.signalActivity()
         }
-    }, [avatarState])
+
+        // Play idle video when in idle state
+        if (avatarState === "idle" && idleManagerRef.current?.isIdle()) {
+            idleVideo.play().catch(() => { })
+        } else {
+            idleVideo.pause()
+        }
+    }, [avatarState, signSequence])
 
     // ========================================================================
     // VIDEO ERROR HANDLING

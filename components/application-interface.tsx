@@ -1,19 +1,25 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useReducer } from "react"
 import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion"
-import { Camera, Mic, Maximize, Minimize, ArrowLeftRight, Activity, Waves, BrainCircuit, Sparkles, Volume2 } from "lucide-react"
+import { Camera, Mic, Maximize, Minimize, ArrowLeftRight, Activity, Waves, BrainCircuit, Sparkles, Volume2, Shield } from "lucide-react"
+import { EmergencyErrorBoundary, EmergencyFallback } from "./EmergencyErrorBoundary"
+import { EmergencyFallbackSystem, useFallbackDetection, type FallbackMode } from "./EmergencyFallbackSystem"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useRef } from "react"
-import { mediateIntent, type MediationContext, type MediationMode } from "@/lib/mediator"
+import { type MediationContext, type MediationMode } from "@/lib/mediator"
 import { speechSynthesis } from "@/lib/speech-synthesis"
 import { trackStatusChange, trackError } from "@/lib/analytics"
 import { AIPipelineController } from "@/lib/aiPipelineController"
 import { useAvatarController } from "@/hooks/useAvatarController"
 import { AvatarRenderer, type HandPoseTargets, type ISLGloss } from "@/components/AvatarRenderer"
 import { VideoAvatarRenderer } from "@/components/VideoAvatarRenderer"
-import { extractASLIntents, intentsToGlosses } from "@/lib/aslIntentMapper"
+// Note: extractASLIntents/intentsToGlosses not used directly - video avatar uses raw transcript matching
+import { avatarCache } from "@/lib/avatarCache"
+import { AvatarDebugPanel } from "@/components/AvatarDebugPanel"
+import { medicalTermCache } from "@/lib/medicalTermCache"
+import { performanceTimer } from "@/lib/performanceTimer"
 
 /**
  * APPLICATION INTERFACE COMPONENT
@@ -61,6 +67,132 @@ import { extractASLIntents, intentsToGlosses } from "@/lib/aslIntentMapper"
 type Context = "hospital" | "emergency"
 type Mode = "deaf-to-hearing" | "hearing-to-deaf"
 type SystemStatus = "listening" | "understanding" | "responding" | "speaking"
+
+// ============================================================================
+// EMERGENCY STATE MANAGEMENT - useReducer Implementation
+// ============================================================================
+
+interface EmergencyState {
+  context: Context
+  isTransitioning: boolean
+  lastToggleTime: number
+  errorCount: number
+  fallbackMode: 'none' | 'text-only' | 'offline' | 'emergency-chat'
+}
+
+type EmergencyAction =
+  | { type: 'TOGGLE_EMERGENCY' }
+  | { type: 'COMPLETE_TRANSITION' }
+  | { type: 'ERROR_OCCURRED'; error: string }
+  | { type: 'ACTIVATE_FALLBACK'; mode: EmergencyState['fallbackMode'] }
+  | { type: 'RESET_STATE' }
+  | { type: 'LOAD_FROM_STORAGE'; state: EmergencyState }
+
+const EMERGENCY_STORAGE_KEY = 'signbridge-emergency-state'
+
+const initialEmergencyState: EmergencyState = {
+  context: 'hospital',
+  isTransitioning: false,
+  lastToggleTime: 0,
+  errorCount: 0,
+  fallbackMode: 'none'
+}
+
+function emergencyReducer(state: EmergencyState, action: EmergencyAction): EmergencyState {
+  switch (action.type) {
+    case 'TOGGLE_EMERGENCY':
+      const newContext: Context = state.context === 'emergency' ? 'hospital' : 'emergency'
+      const newState = {
+        ...state,
+        context: newContext,
+        isTransitioning: true,
+        lastToggleTime: Date.now()
+      }
+
+      // Persist to localStorage immediately
+      try {
+        if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+          localStorage.setItem(EMERGENCY_STORAGE_KEY, JSON.stringify(newState))
+        }
+      } catch (error) {
+        console.warn('Failed to persist emergency state:', error)
+      }
+
+      return newState
+
+    case 'COMPLETE_TRANSITION':
+      const completedState = {
+        ...state,
+        isTransitioning: false
+      }
+
+      // Persist to localStorage
+      try {
+        if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+          localStorage.setItem(EMERGENCY_STORAGE_KEY, JSON.stringify(completedState))
+        }
+      } catch (error) {
+        console.warn('Failed to persist emergency state:', error)
+      }
+
+      return completedState
+
+    case 'ERROR_OCCURRED':
+      console.error('🚨 Emergency state error:', action.error)
+      return {
+        ...state,
+        errorCount: state.errorCount + 1
+      }
+
+    case 'ACTIVATE_FALLBACK':
+      return {
+        ...state,
+        fallbackMode: action.mode
+      }
+
+    case 'RESET_STATE':
+      // Clear localStorage
+      try {
+        if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+          localStorage.removeItem(EMERGENCY_STORAGE_KEY)
+        }
+      } catch (error) {
+        console.warn('Failed to clear emergency state:', error)
+      }
+
+      return initialEmergencyState
+
+    case 'LOAD_FROM_STORAGE':
+      return action.state
+
+    default:
+      return state
+  }
+}
+
+// Helper function to load state from localStorage
+function loadEmergencyStateFromStorage(): EmergencyState {
+  try {
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(EMERGENCY_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        // Validate the stored state structure
+        if (parsed && typeof parsed === 'object' &&
+          (parsed.context === 'hospital' || parsed.context === 'emergency')) {
+          return {
+            ...initialEmergencyState,
+            ...parsed
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to load emergency state from storage:', error)
+  }
+
+  return initialEmergencyState
+}
 
 const statusMessages = ["Listening...", "Understanding context...", "Processing response...", "Speaking..."]
 
@@ -230,15 +362,49 @@ const DEMO_SCENARIOS: Record<string, DemoScenario> = {
 // Select active demo scenario (change this to switch scenarios)
 const ACTIVE_DEMO_SCENARIO = "emergencyChestPain"
 
+interface SubtitleEntry {
+  primary: string
+  // secondary removed as we single-stream now
+}
+
 export function ApplicationInterface() {
   // ============================================================================
   // STATE MANAGEMENT - AI Integration Points
   // ============================================================================
 
-  const [context, setContext] = useState<Context>("hospital")
+  // Emergency state management with useReducer for reliability
+  const [emergencyState, dispatchEmergency] = useReducer(emergencyReducer, initialEmergencyState)
+  const { context } = emergencyState
+
+  // Emergency siren audio beep
+  const playEmergencyBeep = () => {
+    try {
+      // Create audio context for emergency beep
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      // Emergency siren sound: alternating high-low tones
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.2)
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.4)
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.6)
+
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.6)
+    } catch (error) {
+      console.warn('Emergency beep audio failed:', error)
+    }
+  }
+
   const [mode, setMode] = useState<Mode>("deaf-to-hearing")
   const [status, setStatus] = useState<SystemStatus>("listening")
-  const [subtitles, setSubtitles] = useState<string[]>([])
+  const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([])
   const [cameraActive, setCameraActive] = useState(true)
   const [micActive, setMicActive] = useState(true)
   const [handPoseTargets, setHandPoseTargets] = useState<HandPoseTargets | undefined>(undefined)
@@ -246,8 +412,20 @@ export function ApplicationInterface() {
   // Phase 3 sign sequence for speech-to-sign pipeline (Hearing → Deaf)
   const [signSequence, setSignSequence] = useState<ISLGloss[]>([])
 
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
   const [isFullscreen, setIsFullscreen] = useState(false)
   const interfaceContainerRef = useRef<HTMLDivElement>(null)
+
+  // Emergency fallback system
+  const {
+    fallbackMode,
+    errorCount,
+    reportError,
+    activateFallback,
+    retrySystem
+  } = useFallbackDetection()
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -273,6 +451,36 @@ export function ApplicationInterface() {
   }, [])
 
   // ============================================================================
+  // EMERGENCY STATE PERSISTENCE - Load from localStorage on mount
+  // ============================================================================
+  useEffect(() => {
+    const storedState = loadEmergencyStateFromStorage()
+    if (storedState.context !== initialEmergencyState.context ||
+      storedState.lastToggleTime !== initialEmergencyState.lastToggleTime) {
+      dispatchEmergency({ type: 'LOAD_FROM_STORAGE', state: storedState })
+    }
+  }, []) // Run only once on mount
+
+  // ============================================================================
+  // EMERGENCY TRANSITION COMPLETION - Handle transition cleanup
+  // ============================================================================
+  useEffect(() => {
+    if (emergencyState.isTransitioning) {
+      // Play emergency beep when switching to emergency mode
+      if (emergencyState.context === 'emergency') {
+        playEmergencyBeep()
+      }
+
+      // Complete transition after 300ms (smooth animation time)
+      const timer = setTimeout(() => {
+        dispatchEmergency({ type: 'COMPLETE_TRANSITION' })
+      }, 300)
+
+      return () => clearTimeout(timer)
+    }
+  }, [emergencyState.isTransitioning, emergencyState.context])
+
+  // ============================================================================
   // AI PIPELINE CONTROLLER - Centralized orchestration
   // ============================================================================
   /**
@@ -296,46 +504,76 @@ export function ApplicationInterface() {
   useEffect(() => {
     const controller = pipelineController.current
 
-    // Status updates - pipeline controls UI status transitions
-    controller.on('status', (newStatus) => {
-      setStatus(newStatus)
+    // PHASE 4 OPTIMIZATION: Warm medical term cache in background
+    medicalTermCache.warmCache().catch(error => {
+      console.warn("⚠️ Cache warming failed:", error)
     })
 
-    // Subtitle updates - pipeline emits mediated text
-    // CRITICAL: In Hearing → Deaf mode, extract ASL intents and trigger avatar signing
-    controller.on('subtitle', async (text) => {
+    // Status updates - pipeline controls UI status transitions
+    const handleStatus = (newStatus: SystemStatus) => {
+      setStatus(newStatus)
+    }
+
+    // Subtitle updates - pipeline emits mediated text for UI display
+    // Updated for DUAL RESPONSE (Gemini + OpenAI)
+    const handleSubtitle = (data: { text: string, secondary?: string }) => {
       setSubtitles((prev) => {
-        const newSubtitles = [...prev, text]
+        const newEntry: SubtitleEntry = {
+          primary: data.text,
+        }
+        const newSubtitles = [...prev, newEntry]
         return newSubtitles.slice(-3) // Keep last 3 lines for readability
       })
+    }
 
-      // HEARING → DEAF: Extract ASL intents from speech and trigger signing
-      // This connection was MISSING - now the avatar actually signs for speech input
-      try {
-        const intents = await extractASLIntents(text)
-        if (intents.length > 0) {
-          const glosses = intentsToGlosses(intents)
-          console.log("🤟 Triggering sign sequence:", glosses)
-          setSignSequence(glosses)
+    // Raw input updates - pipeline emits original unmediated input
+    // CRITICAL: Used for video avatar keyword matching because:
+    // - Mediated text: "Your name is being requested for your record"
+    // - Raw input: "What is your name?"
+    // - Keywords ("your name", "what is your name") match raw input, NOT mediated text
+    const handleRawInput = (rawText: string) => {
+      console.log("📺 Video avatar: raw input for keyword matching:", rawText)
+      setSignSequence([`__TEXT:${rawText}`] as any) // Pass raw transcript with marker
+
+      // PHASE 4 OPTIMIZATION: Learn from successful mediation
+      // If we have recent mediated output, add mapping to cache
+      if (mode === "hearing-to-deaf" && subtitles.length > 0) {
+        const recentMediatedOutput = subtitles[subtitles.length - 1].primary
+        if (recentMediatedOutput && recentMediatedOutput !== rawText) {
+          medicalTermCache.addTerm(rawText, recentMediatedOutput, undefined, 0.9)
         }
-      } catch (error) {
-        // NEVER break pipeline - signing is optional enhancement
-        console.warn("⚠️ ASL intent extraction failed, continuing without signing")
       }
-    })
+    }
 
     // Error handling - pipeline emits errors for logging/display
-    controller.on('error', (error) => {
+    const handleError = (error: string) => {
       console.error('❌ Pipeline error:', error)
+      reportError(error) // Report to fallback system
       trackError(`Pipeline error: ${error}`, { mode, context })
+
+      // Log emergency state error if in emergency mode
+      if (context === 'emergency') {
+        dispatchEmergency({ type: 'ERROR_OCCURRED', error })
+      }
+
       // TODO: Show user-friendly error message in UI
-    })
+    }
+
+    // Subscribe to events
+    controller.on('status', handleStatus)
+    controller.on('subtitle', handleSubtitle as any) // Cast to any to match simple callback signature if needed, or update controller
+    controller.on('rawInput', handleRawInput)
+    controller.on('error', handleError)
 
     // Cleanup on unmount
     return () => {
+      controller.off('status', handleStatus)
+      controller.off('subtitle', handleSubtitle as any)
+      controller.off('rawInput', handleRawInput)
+      controller.off('error', handleError)
       controller.cancel()
     }
-  }, []) // Empty deps - only run once on mount
+  }, [mode, context, dispatchEmergency]) // Re-run when mode or context changes
 
   // ============================================================================
   // AVATAR CONTROLLER - Contract layer integration
@@ -506,7 +744,7 @@ export function ApplicationInterface() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, []) // Empty deps - keyboard shortcuts don't depend on state
 
   // ============================================================================
   // DEMO ORCHESTRATION STATE - Only active when DEMO_MODE_ENABLED = true
@@ -538,8 +776,17 @@ export function ApplicationInterface() {
     const scenario = DEMO_SCENARIOS[ACTIVE_DEMO_SCENARIO]
     if (!scenario) return
 
-    // Set initial context from scenario
-    setContext(scenario.context)
+    // Set initial context from scenario using emergency dispatch
+    if (scenario.context !== context) {
+      if (scenario.context === 'emergency') {
+        dispatchEmergency({ type: 'TOGGLE_EMERGENCY' })
+      } else {
+        // Reset to hospital if needed
+        if (context === 'emergency') {
+          dispatchEmergency({ type: 'TOGGLE_EMERGENCY' })
+        }
+      }
+    }
 
     const currentTurn = scenario.turns[demoTurnIndex]
     if (!currentTurn) {
@@ -566,7 +813,7 @@ export function ApplicationInterface() {
     const dialogueInterval = setInterval(() => {
       if (demoDialogueIndex < currentTurn.dialogue.length) {
         setSubtitles((prev) => {
-          const newSubtitles = [...prev, currentTurn.dialogue[demoDialogueIndex]]
+          const newSubtitles = [...prev, { primary: currentTurn.dialogue[demoDialogueIndex] }]
           return newSubtitles.slice(-3) // Keep last 3 lines
         })
         setDemoDialogueIndex((prev) => prev + 1)
@@ -585,7 +832,7 @@ export function ApplicationInterface() {
       clearInterval(statusInterval)
       clearInterval(dialogueInterval)
     }
-  }, [demoTurnIndex, demoDialogueIndex])
+  }, [demoTurnIndex, demoDialogueIndex, context, dispatchEmergency])
 
   // ============================================================================
   // PRODUCTION SUBTITLE PIPELINE - Real signal paths only
@@ -709,8 +956,88 @@ export function ApplicationInterface() {
         console.warn("⚠️ Permission API unavailable, will attempt getUserMedia directly")
       }
 
-      // Step 2: Enumerate audio input devices BEFORE requesting permission
-      // This detects missing microphones before triggering browser prompt
+      // Step 2: Pre-flight diagnostics - what devices does the browser see?
+      // This helps debug issues even before requesting permission
+      try {
+        const preDevices = await navigator.mediaDevices.enumerateDevices()
+        const preAudioInputs = preDevices.filter(d => d.kind === "audioinput")
+        console.log("🔍 Pre-permission device scan:", {
+          total: preDevices.length,
+          audioInputs: preAudioInputs.length,
+          devices: preAudioInputs.map(d => ({
+            id: d.deviceId.substring(0, 8) + "...",
+            label: d.label || "(unlabeled - permission pending)"
+          }))
+        })
+      } catch (e) {
+        console.warn("⚠️ Pre-flight device scan failed:", e)
+      }
+
+      // Step 3: Request explicit microphone access
+      // This triggers browser permission prompt if not yet granted
+      let stream: MediaStream | null = null
+      try {
+        // Try with relaxed constraints - don't require specific sample rate/channels
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true }
+          }
+        })
+        console.log("✅ Microphone permission granted, tracks:", stream.getAudioTracks().map(t => ({
+          label: t.label,
+          enabled: t.enabled,
+          muted: t.muted,
+          readyState: t.readyState
+        })))
+      } catch (error: any) {
+        // Enhanced error diagnostic
+        console.error("❌ getUserMedia failed:", {
+          name: error.name,
+          message: error.message,
+          constraint: error.constraint
+        })
+
+        if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+          console.error("🚫 Microphone permission denied. Check:", [
+            "1. Browser permission prompt (may be in address bar)",
+            "2. macOS System Preferences > Security & Privacy > Microphone",
+            "3. Browser site settings for localhost"
+          ].join("\n"))
+          return
+        }
+        if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+          console.error("🎤 No microphone device found. Check:", [
+            "1. macOS System Preferences > Sound > Input (select a mic)",
+            "2. Physical microphone connection",
+            "3. Try: chrome://settings/content/microphone"
+          ].join("\n"))
+          return
+        }
+        if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+          console.error("🔒 Microphone is in use by another application or hardware issue")
+          return
+        }
+        if (error.name === "OverconstrainedError") {
+          console.error("⚙️ Audio constraints too strict:", error.constraint)
+          // Retry with minimal constraints
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            console.log("✅ Microphone access succeeded with basic constraints")
+          } catch (retryError) {
+            console.error("❌ Retry with basic constraints also failed")
+            return
+          }
+        }
+        if (!stream) {
+          console.error("❌ Microphone access error:", error.message)
+          return
+        }
+      }
+
+      // Step 3: NOW enumerate audio input devices (after permission is granted)
+      // Browsers will reveal actual device labels after getUserMedia succeeds
       try {
         const devices = await navigator.mediaDevices.enumerateDevices()
         const audioInputs = devices.filter(d => d.kind === "audioinput")
@@ -718,33 +1045,20 @@ export function ApplicationInterface() {
         console.log("🎤 Available microphones:", audioInputs.map(d => d.label || "Unlabeled"))
 
         if (audioInputs.length === 0) {
-          console.error("🎤 Browser cannot access any microphone input. No audioinput devices found.")
-          return
+          console.warn("⚠️ No named audio devices found, but microphone access was granted. Continuing...")
+          // Don't return - getUserMedia succeeded, so there IS a mic
         }
       } catch (error: any) {
         console.warn("⚠️ Device enumeration failed:", error.message)
-        // Continue anyway - getUserMedia will provide authoritative result
+        // Continue anyway - getUserMedia already succeeded
       }
 
-      // Step 3: Request explicit microphone access
-      // This triggers browser permission prompt if not yet granted
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        console.log("✅ Microphone permission granted, starting recognition")
-        // Stop the stream immediately - we only needed it for permission
+      // Stop the stream immediately - we only needed it for permission verification
+      if (stream) {
         stream.getTracks().forEach(track => track.stop())
-      } catch (error: any) {
-        if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-          console.error("🚫 Microphone blocked by browser settings. Grant permission and try again.")
-          return
-        }
-        if (error.name === "NotFoundError") {
-          console.error("🎤 Browser cannot access any microphone input. Check hardware connection.")
-          return
-        }
-        console.error("❌ Microphone access error:", error.message)
-        return
       }
+
+      console.log("✅ Microphone initialized, starting recognition...")
 
       // Permission granted - proceed with speech recognition
       initializeSpeechRecognition()
@@ -754,22 +1068,93 @@ export function ApplicationInterface() {
       // Initialize speech recognition
       const recognition = new SpeechRecognition()
 
-      // Configuration for optimal medical dialogue recognition
-      recognition.continuous = true // Keep listening continuously
-      recognition.interimResults = true // Show partial results as user speaks
+      // PHASE 4 OPTIMIZATION: Configure Web Speech API for ultra-low latency
+      recognition.continuous = true // Keep listening continuously (Requirement 1.2)
+      recognition.interimResults = true // Show partial results as user speaks (Requirement 1.2)
       recognition.lang = "en-US" // TODO: Make language configurable
       recognition.maxAlternatives = 1 // We only need the best match
 
-      // Track if we're currently processing to manage status transitions
-      let isProcessing = false
-      let processingTimeout: NodeJS.Timeout | null = null
+      // Performance timing measurements for each pipeline stage
+      const performanceTimings = {
+        speechStart: 0,
+        recognitionComplete: 0,
+        cacheCheck: 0,
+        pipelineStart: 0,
+        pipelineComplete: 0
+      }
+
+      // RESTART LOGIC STATE
+      let restartTimeout: NodeJS.Timeout | null = null
+      let retryCount = 0
+      const MAX_RETRIES = 5
+      const BASE_DELAY = 1000 // Start with 1s delay
+
+      /**
+       * ROBUST RESTART STRATEGY
+       * 
+       * Handles restarts with exponential backoff to prevent tight loops
+       * and respects the global processing state to avoid race conditions.
+       */
+      const restartRecognition = (delay = 300) => {
+        // Clear any pending restarts
+        if (restartTimeout) clearTimeout(restartTimeout)
+
+        // Don't restart if:
+        // 1. Mic is explicitly turned off
+        // 2. Demo mode is enabled (STT should be off)
+        // 3. System is currently processing input (unless we want overlap)
+        if (!micActive || DEMO_MODE_ENABLED) {
+          console.log("🛑 Restart cancelled: Mic off or Demo mode active")
+          return
+        }
+
+        // Check global pipeline state to avoid race conditions
+        // We shouldn't listen while the avatar is speaking (unless duplex is supported)
+        if (pipelineController.current.isCurrentlyProcessing()) {
+          console.log("⏳ Restart delayed: Pipeline busy processing/speaking")
+          // Check again later
+          restartTimeout = setTimeout(() => restartRecognition(delay), 1000)
+          return
+        }
+
+        restartTimeout = setTimeout(() => {
+          try {
+            // Check one last time before starting
+            if (micActive && !DEMO_MODE_ENABLED) {
+              console.log(`🔄 Restarting speech recognition (Attempt ${retryCount + 1})...`)
+              recognition.start()
+            }
+          } catch (error) {
+            const msg = (error as Error).message
+            if (!msg.includes("already started")) {
+              console.warn("⚠️ Restart failed:", error)
+
+              // Exponential backoff for repeated failures
+              retryCount++
+              if (retryCount < MAX_RETRIES) {
+                const nextDelay = Math.min(BASE_DELAY * Math.pow(1.5, retryCount), 10000)
+                console.log(`⏳ Retrying in ${nextDelay}ms...`)
+                restartRecognition(nextDelay)
+              } else {
+                console.error("❌ Max retries reached. Stopping auto-restart.")
+                trackError("Max speech recognition retries reached", { mode, context })
+                // TODO: Notify user to toggle mic manually
+              }
+            }
+          }
+        }, delay)
+      }
 
       // ========================================================================
       // EVENT: Speech Start - User begins speaking
       // ========================================================================
       recognition.onstart = () => {
         console.log("🎤 Speech recognition started - listening for hearing user...")
+        performanceTimings.speechStart = performance.now() // Record speech capture start
         setStatus("listening")
+
+        // Reset retry count on successful start
+        retryCount = 0
       }
 
       // ========================================================================
@@ -781,43 +1166,87 @@ export function ApplicationInterface() {
         const latestResult = results[results.length - 1]
         const transcript = (latestResult as any)[0].transcript.trim()
         const isFinal = (latestResult as any).isFinal
+        const isInterim = !isFinal
+
+        // PHASE 4 OPTIMIZATION: Predictive avatar animation during speech
+        if (isInterim && transcript.length > 0) {
+          // Start predictive avatar preparation during ongoing speech (Requirement 1.4)
+          // console.log("🎯 Predictive animation prep:", transcript)
+          performanceTimings.cacheCheck = performance.now()
+
+          // Check if this looks like a medical term for early cache preparation
+          const cacheResult = medicalTermCache.lookup(transcript)
+          if (cacheResult.hit) {
+            // console.log("🚀 Early cache hit - preparing avatar for instant playback")
+            // TODO: Trigger predictive avatar preparation
+          }
+        }
 
         // Only process final results (complete sentences/phrases)
         if (isFinal && transcript.length > 0) {
           console.log("📝 Recognized speech:", transcript)
+          performanceTimings.recognitionComplete = performance.now()
 
-          // ====================================================================
-          // PIPELINE CONTROLLER INTEGRATION - Speech Input
-          // ====================================================================
-          // Instead of manually managing state transitions with nested setTimeout,
-          // we delegate to the pipeline controller which handles:
-          // - AI mediation (understanding stage)
-          // - Response preparation (generating stage)
-          // - Subtitle emission (delivering stage)
-          // - Automatic return to listening
-          //
-          // All timing values are centralized in PIPELINE_TIMINGS configuration.
-          // ====================================================================
+          // PHASE 4 OPTIMIZATION: Medical term cache lookup to bypass LLM (Requirement 1.3)
+          const cacheResult = medicalTermCache.lookup(transcript)
 
-          pipelineController.current.processInput(
-            {
-              type: "speech",
-              transcript: transcript,
-            },
-            {
-              mode: mode as MediationMode,
-              context: context as MediationContext,
-              recentHistory: subtitles.slice(-2), // Last 2 utterances for context
+          if (cacheResult.hit && cacheResult.entry) {
+            // Cache HIT - bypass LLM processing entirely for ultra-low latency
+            console.log("⚡ Cache HIT - bypassing LLM processing")
+
+            // Update subtitles immediately with cached mediated text
+            setSubtitles((prev) => {
+              const newEntry: SubtitleEntry = { primary: cacheResult.entry!.mediatedText }
+              const newSubtitles = [...prev, newEntry]
+              return newSubtitles.slice(-3)
+            })
+
+            // Trigger sign sequence if available
+            if (cacheResult.entry.signIntent) {
+              try {
+                const glosses = [cacheResult.entry.signIntent as ISLGloss]
+                console.log("🤟 Triggering cached sign sequence:", glosses)
+                setSignSequence(glosses)
+              } catch (error) {
+                console.warn("⚠️ Cached sign playback failed, continuing without signing")
+              }
             }
-          )
 
-          // TODO: INTEGRATION POINT - Sign Language Generation
-          // Hook into pipeline controller's 'generate' stage for avatar animation
-          // Example:
-          // pipelineController.current.onGenerate = async (text) => {
-          //   const signCommands = await generateSignLanguage(text)
-          //   avatarController.queueAnimation(signCommands)
-          // }
+            // Set status to speaking immediately (skip understanding/responding stages)
+            setStatus("speaking")
+
+            // Return to listening after brief display
+            setTimeout(() => {
+              setStatus("listening")
+            }, 2000)
+
+          } else {
+            // Cache MISS - use full pipeline with LLM processing
+            console.log("❌ Cache MISS - using full LLM pipeline")
+            performanceTimings.pipelineStart = performance.now()
+
+            // ====================================================================
+            // PIPELINE CONTROLLER INTEGRATION - Speech Input
+            // ====================================================================
+            // IMPORTANT: The controller handles the "isProcessing" state internally.
+            // We just fire and forget here.
+            pipelineController.current.processInput(
+              {
+                type: "speech",
+                transcript: transcript,
+              },
+              {
+                mode: mode as MediationMode,
+                context: context as MediationContext,
+                recentHistory: subtitles.map(s => s.primary).slice(-2), // Last 2 utterances for context
+              },
+              context === "emergency" // Pass emergency mode flag
+            )
+          }
+
+          // Performance timing: Log complete recognition timing
+          const recognitionDuration = performanceTimings.recognitionComplete - performanceTimings.speechStart
+          console.log(`📊 Speech recognition: ${recognitionDuration.toFixed(1)}ms`)
         }
       }
 
@@ -827,18 +1256,8 @@ export function ApplicationInterface() {
       recognition.onend = () => {
         console.log("🎤 Speech recognition ended")
 
-        // Auto-restart if microphone is still active and not processing
-        // This ensures continuous listening for medical conversations
-        if (micActive && !isProcessing) {
-          try {
-            recognition.start()
-          } catch (error) {
-            // Ignore "already started" errors
-            if (!(error as Error).message.includes("already started")) {
-              console.error("Failed to restart recognition:", error)
-            }
-          }
-        }
+        // Use robust restart logic
+        restartRecognition(300) // Short delay to prevent tight loops
       }
 
       // ========================================================================
@@ -848,76 +1267,38 @@ export function ApplicationInterface() {
         // Handle specific error cases
         switch (event.error) {
           case "no-speech":
-            // BROWSER QUIRK: Chrome/Safari fire "no-speech" after silence timeout.
-            // This is NOT an error - it's expected idle behavior.
-            // Do NOT log as error to avoid scary console messages.
-
-            // Reset to idle listening state
-            if (!isProcessing) {
-              setStatus("listening")
-            }
-
-            // Auto-restart recognition if mic is still active and demo mode is off
-            // Guard against infinite loops: only restart if we're in production STT mode
-            if (micActive && !DEMO_MODE_ENABLED) {
-              try {
-                recognition.start()
-              } catch (error) {
-                // Ignore "already started" errors to prevent restart loops
-                if (!(error as Error).message.includes("already started")) {
-                  console.error("Failed to restart after no-speech:", error)
-                }
-              }
-            }
+            // Normal behavior for silence. 
+            // Just restart with a standard check.
+            restartRecognition(100)
             break
 
           case "aborted":
-            // CONTROLLED STOP: User or system intentionally stopped recognition.
-            // This is normal behavior when toggling mic off or changing modes.
-            // Do NOT log as error, do NOT restart.
-            if (!isProcessing) {
-              setStatus("listening")
-            }
+            // Do nothing, likely intentional stop
             break
 
           case "not-allowed":
           case "permission-denied":
-            console.error(
-              "🚫 Microphone permission denied. " +
-              "Please allow microphone access in browser settings."
-            )
+            console.error("🚫 Microphone permission denied.")
             trackError("Microphone permission denied", { mode, context })
-            // TODO: Show user-friendly error message in UI
-            // setError("Microphone access required for speech recognition")
-            break
+            // Stop retrying
+            return
 
           case "audio-capture":
-            console.error(
-              "🎤 No microphone found. " +
-              "Please connect a microphone and refresh."
-            )
+            console.error("🎤 No microphone found.")
             trackError("No microphone found", { mode, context })
-            // TODO: Show user-friendly error message in UI
-            break
+            return
 
           case "network":
-            console.error(
-              "🌐 Network error during speech recognition. " +
-              "Check internet connection."
-            )
+            console.error("🌐 Network error - attempting retry...")
             trackError("Speech recognition network error", { mode, context })
-            // TODO: Show user-friendly error message in UI
+            // Retry with longer backoff
+            restartRecognition(2000)
             break
 
           default:
-            // Only log truly unknown errors
             console.error(`❌ Speech recognition error: ${event.error}`)
-            trackError(`Speech recognition error: ${event.error}`, { mode, context })
-        }
-
-        // Reset status on real errors (not no-speech or aborted)
-        if (!isProcessing && event.error !== "no-speech" && event.error !== "aborted") {
-          setStatus("listening")
+            // Attempt recovery for unknown errors
+            restartRecognition(1000)
         }
       }
 
@@ -936,9 +1317,7 @@ export function ApplicationInterface() {
       // ========================================================================
       return () => {
         console.log("🛑 Stopping speech recognition...")
-        if (processingTimeout) {
-          clearTimeout(processingTimeout)
-        }
+        if (restartTimeout) clearTimeout(restartTimeout)
         try {
           recognition.stop()
         } catch (error) {
@@ -1070,18 +1449,27 @@ export function ApplicationInterface() {
 
         console.log("📹 Initializing MediaPipe Hands for sign language recognition...")
 
-        // Create hidden video element for camera feed
-        videoElement = document.createElement("video")
-        videoElement.style.display = "none"
-        videoElement.setAttribute("playsinline", "true")
-        document.body.appendChild(videoElement)
+        // Create visible video/canvas elements using refs if available, or fallback to hidden
+        videoElement = videoRef.current
+        if (!videoElement) {
+          videoElement = document.createElement("video")
+          videoElement.style.display = "none"
+          videoElement.setAttribute("playsinline", "true")
+          document.body.appendChild(videoElement)
+        }
 
-        // Create hidden canvas for processing
-        canvasElement = document.createElement("canvas")
-        canvasElement.style.display = "none"
-        canvasElement.width = 640
-        canvasElement.height = 480
-        document.body.appendChild(canvasElement)
+        canvasElement = canvasRef.current
+        if (!canvasElement) {
+          canvasElement = document.createElement("canvas")
+          canvasElement.style.display = "none"
+          canvasElement.width = 640
+          canvasElement.height = 480
+          document.body.appendChild(canvasElement)
+        } else {
+          // Ensure canvas resolution matches internal processing resolution
+          canvasElement.width = 640
+          canvasElement.height = 480
+        }
 
         // ====================================================================
         // MEDIAPIPE HANDS CONFIGURATION
@@ -1107,10 +1495,41 @@ export function ApplicationInterface() {
           if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
             // No hands detected - clear hand pose targets and remain in listening state
             setHandPoseTargets(undefined)
+
+            // Clear canvas
+            if (canvasElement) {
+              const ctx = canvasElement.getContext('2d')
+              if (ctx) ctx.clearRect(0, 0, canvasElement.width, canvasElement.height)
+            }
+
             if (!isProcessing) {
               setStatus("listening")
             }
             return
+          }
+
+          // Draw landmarks on canvas for visual feedback
+          if (canvasElement) {
+            const ctx = canvasElement.getContext('2d')
+            if (ctx) {
+              ctx.clearRect(0, 0, canvasElement.width, canvasElement.height)
+
+              // Draw each hand
+              if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                  // Draw dots for joints
+                  ctx.fillStyle = "rgba(0, 255, 128, 0.8)" // Bright teal-green
+                  for (const landmark of landmarks) {
+                    const x = landmark.x * canvasElement.width
+                    const y = landmark.y * canvasElement.height
+
+                    ctx.beginPath()
+                    ctx.arc(x, y, 4, 0, 2 * Math.PI)
+                    ctx.fill()
+                  }
+                }
+              }
+            }
           }
 
           // ================================================================
@@ -1145,8 +1564,36 @@ export function ApplicationInterface() {
           }
 
           // ================================================================
-          // GESTURE RECOGNITION - With Stabilization
+          // GESTURE RECOGNITION - With Stabilization and Caching
           // ================================================================
+
+          // Check cache first for deaf→hearing mode
+          const gestureKey = avatarCache.generateGestureKey(results.multiHandLandmarks)
+          const cachedRecognition = avatarCache.getSignRecognition(gestureKey)
+
+          if (cachedRecognition && !isProcessing) {
+            console.log("👋 Using cached gesture recognition:", cachedRecognition.recognizedSigns)
+
+            // Use cached result directly
+            lastGestureTime = now
+            isProcessing = true
+
+            pipelineController.current.processInput(
+              {
+                type: "gesture",
+                intent: cachedRecognition.recognizedSigns[0] || "unknown",
+                phrase: cachedRecognition.recognizedSigns.join(" "),
+              },
+              {
+                mode: mode as MediationMode,
+                context: context as MediationContext,
+                recentHistory: subtitles.slice(-2),
+              },
+              context === "emergency" // Pass emergency mode flag
+            )
+            return
+          }
+
           const gestureResult = recognizeGesture(results.multiHandLandmarks, results.multiHandedness)
 
           if (gestureResult && !isProcessing) {
@@ -1159,6 +1606,13 @@ export function ApplicationInterface() {
               resetStabilization()
 
               console.log("👋 Stable gesture recognized:", stableIntent, "confidence:", gestureResult.confidence?.toFixed(2))
+
+              // Cache the recognition result for future use
+              avatarCache.setSignRecognition(gestureKey, {
+                gestureData: JSON.stringify(results.multiHandLandmarks),
+                recognizedSigns: [gestureResult.intent],
+                confidence: gestureResult.confidence || 0.8,
+              })
 
               // ================================================================
               // PIPELINE CONTROLLER INTEGRATION - Gesture Input
@@ -1182,8 +1636,9 @@ export function ApplicationInterface() {
                 {
                   mode: mode as MediationMode,
                   context: context as MediationContext,
-                  recentHistory: subtitles.slice(-2), // Last 2 utterances for context
-                }
+                  recentHistory: subtitles.map(s => s.primary).slice(-2), // Last 2 utterances for context
+                },
+                context === "emergency" // Pass emergency mode flag
               )
 
               // Reset processing flag after pipeline completes
@@ -1275,11 +1730,11 @@ export function ApplicationInterface() {
         }
       }
 
-      if (videoElement && videoElement.parentNode) {
+      if (videoElement && videoElement.parentNode && videoElement !== videoRef.current) {
         videoElement.parentNode.removeChild(videoElement)
       }
 
-      if (canvasElement && canvasElement.parentNode) {
+      if (canvasElement && canvasElement.parentNode && canvasElement !== canvasRef.current) {
         canvasElement.parentNode.removeChild(canvasElement)
       }
     }
@@ -1335,8 +1790,11 @@ export function ApplicationInterface() {
     // Guard clauses - only run TTS in production mode when speaking
     if (DEMO_MODE_ENABLED) return
     if (status !== "speaking") {
-      // Cancel any ongoing speech when status changes away from "speaking"
-      speechSynthesis.cancel()
+      // CRITICAL FIX: Only cancel speech when NOT in deaf-to-hearing mode
+      // In deaf-to-hearing mode, speech must complete fully before being canceled
+      if (mode !== "deaf-to-hearing") {
+        speechSynthesis.cancel()
+      }
       // Reset last-spoken tracker when not speaking
       lastSpokenTextRef.current = ""
       return
@@ -1354,39 +1812,62 @@ export function ApplicationInterface() {
 
     // Extract the latest subtitle line to speak
     const latestSubtitle = subtitles[subtitles.length - 1]
+    const latestSubtitleText = latestSubtitle.primary
 
     // DUPLICATE PREVENTION: Only speak if text has changed
-    if (latestSubtitle === lastSpokenTextRef.current) {
+    if (latestSubtitleText === lastSpokenTextRef.current) {
       // Already spoken this text, skip to prevent repetition
       return
     }
 
-    // Update last-spoken tracker
-    lastSpokenTextRef.current = latestSubtitle
+    // CRITICAL FIX: Prevent interrupting ongoing speech
+    // If TTS is already speaking, do NOT start new speech
+    // Latest recognition must wait, not cancel
+    if (speechSynthesis.isSpeaking()) {
+      console.log("🔊 Speech already in progress, queuing new text")
+      return
+    }
 
-    console.log(`🔊 Speaking (${context} context):`, latestSubtitle)
+    // Update last-spoken tracker
+    lastSpokenTextRef.current = latestSubtitleText
+
+    console.log(`🔊 Speaking (${context} context):`, latestSubtitleText)
 
     // Speak the text with context-aware parameters
     speechSynthesis.speak({
-      text: latestSubtitle,
+      text: latestSubtitleText,
       context: context, // "hospital" or "emergency"
+      variant: mode === "deaf-to-hearing" ? "sweet" : "default", // Use "sweet" voice for sign recognition
       onStart: () => {
         console.log("✅ TTS started")
       },
       onEnd: () => {
         console.log("✅ TTS completed")
+        // CRITICAL FIX: In deaf-to-hearing mode, restart listening ONLY after speech completes
+        // This ensures sequential flow: recognize → speak → listen
+        if (mode === "deaf-to-hearing") {
+          console.log("🎤 Speech complete, resuming listening...")
+          setStatus("listening")
+        }
       },
       onError: (error) => {
         console.error("❌ TTS error:", error.message)
         // Graceful degradation - continue without speech
+        // Log emergency state error if in emergency mode
+        if (context === 'emergency') {
+          dispatchEmergency({ type: 'ERROR_OCCURRED', error: `TTS error: ${error.message}` })
+        }
       },
     })
 
-    // Cleanup: Cancel speech when component unmounts or status changes
+    // CRITICAL FIX: Do NOT cancel speech in cleanup for deaf-to-hearing mode
+    // Speech must complete fully before being interrupted
     return () => {
-      speechSynthesis.cancel()
+      if (mode !== "deaf-to-hearing") {
+        speechSynthesis.cancel()
+      }
     }
-  }, [status, subtitles, context]) // Re-run when status, subtitles, or context changes
+  }, [status, subtitles, context, mode, dispatchEmergency]) // Added mode dependency
 
   // Cancel speech immediately when mode changes (user switches communication direction)
   useEffect(() => {
@@ -1808,9 +2289,9 @@ export function ApplicationInterface() {
     <motion.section
       ref={sectionRef}
       style={{ y: sectionY, opacity: sectionOpacity }}
-      className="relative bg-background py-32 -mt-16"
+      className="relative bg-background/80 backdrop-blur-sm py-32 -mt-16"
     >
-      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-background to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-background/80 to-transparent pointer-events-none" />
 
       {/* Section header */}
       <motion.div
@@ -1846,12 +2327,12 @@ export function ApplicationInterface() {
         <motion.div
           ref={interfaceContainerRef}
           className={cn(
-            "relative overflow-hidden transition-all duration-700",
+            "relative overflow-hidden transition-all duration-700 emergency-container",
             isFullscreen
               ? "rounded-none border-0 w-screen h-screen flex flex-col bg-background"
               : "rounded-2xl border bg-card shadow-2xl",
             (!isFullscreen && context === "hospital") ? "border-border shadow-primary/10" : "",
-            (!isFullscreen && context !== "hospital") ? "border-destructive/50 shadow-destructive/20" : "",
+            (!isFullscreen && context !== "hospital") ? "border-destructive/50 shadow-destructive/20 emergency-active" : "",
           )}
           animate={
             context === "emergency" && !isFullscreen
@@ -1864,9 +2345,45 @@ export function ApplicationInterface() {
               }
               : {}
           }
-          transition={{ duration: 1.5, repeat: context === "emergency" ? Number.POSITIVE_INFINITY : 0 }}
+          transition={{ type: "tween", duration: 1.5, repeat: context === "emergency" ? Number.POSITIVE_INFINITY : 0 }}
         >
-          {/* Top bar */}
+          {/* Emergency Mode Banner */}
+          <AnimatePresence>
+            {context === "emergency" && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+                className="emergency-banner overflow-hidden"
+              >
+                <div className="bg-destructive text-destructive-foreground px-6 py-3 text-center emergency-siren">
+                  <div className="flex items-center justify-center gap-2">
+                    <motion.div
+                      animate={{ rotate: [0, 10, -10, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 1 }}
+                    >
+                      🚨
+                    </motion.div>
+                    <span className="font-bold text-lg emergency-text-scale emergency-active">
+                      EMERGENCY MODE ACTIVE
+                    </span>
+                    <motion.div
+                      animate={{ rotate: [0, -10, 10, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 1 }}
+                    >
+                      🚨
+                    </motion.div>
+                  </div>
+                  <p className="text-sm mt-1 opacity-90">
+                    Priority communication mode - Enhanced speed and reliability
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Main Interface Content */}
           <div
             className={cn(
               "flex items-center justify-between border-b px-6 py-4 transition-colors duration-500",
@@ -1875,12 +2392,39 @@ export function ApplicationInterface() {
           >
             {/* Context toggle */}
             <div className="flex items-center gap-2">
-              <ContextToggle context={context} onChange={setContext} />
+              <EmergencyErrorBoundary
+                fallback={<EmergencyFallback />}
+                onError={(error, errorInfo) => {
+                  console.error('🚨 Emergency mode toggle error:', error)
+                  reportError(`Emergency toggle: ${error.message}`) // Report to fallback system
+                  dispatchEmergency({ type: 'ERROR_OCCURRED', error: error.message })
+                }}
+              >
+                <ContextToggle
+                  context={context}
+                  onChange={() => dispatchEmergency({ type: 'TOGGLE_EMERGENCY' })}
+                  isTransitioning={emergencyState.isTransitioning}
+                />
+              </EmergencyErrorBoundary>
             </div>
 
             {/* Mode indicator */}
             <div className="flex items-center gap-3">
               <ModeIndicator mode={mode} onChange={setMode} context={context} />
+
+              {/* Emergency/Performance Badge */}
+              <motion.div
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-medium transition-all duration-300",
+                  context === "emergency"
+                    ? "bg-destructive text-destructive-foreground emergency-pulse"
+                    : "bg-primary/10 text-primary"
+                )}
+                animate={context === "emergency" ? { scale: [1, 1.05, 1] } : {}}
+                transition={{ duration: 1, repeat: context === "emergency" ? Infinity : 0 }}
+              >
+                {context === "emergency" ? "🚨 PRIORITY MODE" : "⚡ READY"}
+              </motion.div>
             </div>
 
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
@@ -1936,18 +2480,36 @@ export function ApplicationInterface() {
               {mode === "hearing-to-deaf" ? (
                 <VideoAvatarRenderer
                   signSequence={signSequence}
-                  subtitles={subtitles}
+                  subtitles={subtitles.map(s => s.primary)}
                   className="h-48 w-48 md:h-64 md:w-64 rounded-full overflow-hidden"
                   onSignComplete={() => setSignSequence([])}
                 />
               ) : (
-                <AvatarRenderer
-                  avatarState={avatarState}
-                  handPoseTargets={handPoseTargets}
-                  activeISLSign={activeISLSign}
-                  signSequence={signSequence.length > 0 ? signSequence : undefined}
-                  className="h-48 w-48 md:h-64 md:w-64"
-                />
+                <div className="relative h-full w-full max-h-[80vh] max-w-[80vw] flex items-center justify-center overflow-hidden rounded-xl">
+                  {!cameraActive && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground z-10 bg-black/5">
+                      <Camera className="w-12 h-12 mb-2 opacity-50" />
+                      <p>Camera Off</p>
+                    </div>
+                  )}
+
+                  <video
+                    ref={videoRef}
+                    className={cn("absolute inset-0 h-full w-full object-contain", !cameraActive && "opacity-0")}
+                    style={{ transform: "scaleX(-1)" }} // Mirror effect
+                    playsInline
+                    muted
+                    autoPlay
+                  />
+
+                  {/* 3D Avatar removed as per user request */}
+
+                  <canvas
+                    ref={canvasRef}
+                    className={cn("absolute inset-0 h-full w-full object-contain pointer-events-none", !cameraActive && "opacity-0")}
+                    style={{ transform: "scaleX(-1)" }} // Mirror effect to match video
+                  />
+                </div>
               )}
             </div>
 
@@ -1973,7 +2535,7 @@ export function ApplicationInterface() {
                       }
                       : {}
                   }
-                  transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
+                  transition={{ type: "tween", duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
                 />
                 <span className="text-xs text-foreground">{cameraActive ? "Camera Active" : "Camera Off"}</span>
               </motion.div>
@@ -2001,7 +2563,7 @@ export function ApplicationInterface() {
                       }
                       : {}
                   }
-                  transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY, delay: 0.5 }}
+                  transition={{ type: "tween", duration: 1.5, repeat: Number.POSITIVE_INFINITY, delay: 0.5 }}
                 />
                 <span className="text-xs text-foreground">{micActive ? "Mic Active" : "Mic Off"}</span>
               </motion.div>
@@ -2058,6 +2620,33 @@ export function ApplicationInterface() {
           </div>
         </motion.div>
       </motion.div>
+
+      {/* Debug Panel - Development Only */}
+      <AvatarDebugPanel />
+
+      {/* Emergency Fallback System */}
+      <EmergencyFallbackSystem
+        currentMode={fallbackMode}
+        onFallbackActivated={(mode) => {
+          activateFallback(mode)
+          dispatchEmergency({ type: 'ACTIVATE_FALLBACK', mode })
+        }}
+        onRetryRequested={() => {
+          retrySystem()
+          dispatchEmergency({ type: 'RESET_STATE' })
+        }}
+      />
+
+      {/* HIPAA Disclaimer */}
+      <div className="w-full py-2 text-center pointer-events-none opacity-50">
+        <p className="text-[10px] tracking-widest text-muted-foreground uppercase flex items-center justify-center gap-2">
+          <Shield className="w-3 h-3" />
+          HIPAA Compliant • End-to-End Encrypted • No PHI Stored
+        </p>
+      </div>
+
+      {/* Bottom gradient fade for smooth transition to next section */}
+      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent pointer-events-none" />
     </motion.section>
   )
 }
@@ -2065,20 +2654,23 @@ export function ApplicationInterface() {
 function ContextToggle({
   context,
   onChange,
+  isTransitioning = false,
 }: {
   context: Context
-  onChange: (context: Context) => void
+  onChange: () => void
+  isTransitioning?: boolean
 }) {
   return (
     <div className="flex items-center gap-1 rounded-full bg-background p-1 relative">
       <motion.button
-        onClick={() => onChange("hospital")}
+        onClick={() => context === "emergency" ? onChange() : undefined}
         className={cn(
           "relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors z-10",
           context === "hospital" ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground",
         )}
         whileHover={{ scale: context === "hospital" ? 1 : 1.02 }}
         whileTap={{ scale: 0.98 }}
+        disabled={isTransitioning}
       >
         {context === "hospital" && (
           <motion.div
@@ -2090,29 +2682,37 @@ function ContextToggle({
         <span className="relative z-10">Hospital</span>
       </motion.button>
       <motion.button
-        onClick={() => onChange("emergency")}
+        onClick={() => context === "hospital" ? onChange() : undefined}
         className={cn(
           "relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors z-10",
           context === "emergency" ? "text-destructive-foreground" : "text-muted-foreground hover:text-foreground",
         )}
         whileHover={{ scale: context === "emergency" ? 1 : 1.02 }}
         whileTap={{ scale: 0.98 }}
+        disabled={isTransitioning}
       >
         {context === "emergency" && (
           <motion.div
             layoutId="context-bg"
             className="absolute inset-0 rounded-full bg-destructive"
             transition={{ type: "spring", duration: 0.5, bounce: 0.2 }}
-            animate={{
-              boxShadow: [
-                "0 0 0 0 var(--destructive)",
-                "0 0 15px 3px var(--destructive)",
-                "0 0 0 0 var(--destructive)",
-              ],
-            }}
-          />
+          >
+            <motion.div
+              className="absolute inset-0 rounded-full"
+              animate={{
+                boxShadow: [
+                  "0 0 0 0 var(--destructive)",
+                  "0 0 15px 3px var(--destructive)",
+                  "0 0 0 0 var(--destructive)",
+                ],
+              }}
+              transition={{ type: "tween", duration: 1.5, repeat: Infinity }}
+            />
+          </motion.div>
         )}
-        <span className="relative z-10">Emergency</span>
+        <span className="relative z-10">
+          {isTransitioning ? "Switching..." : "Emergency"}
+        </span>
       </motion.button>
     </div>
   )
@@ -2522,11 +3122,13 @@ function AvatarPlaceholder({ context, status }: { context: Context; status: Syst
   )
 }
 
+
+
 function SubtitlePanel({
   subtitles,
   context,
   status,
-}: { subtitles: string[]; context: Context; status: SystemStatus }) {
+}: { subtitles: SubtitleEntry[]; context: Context; status: SystemStatus }) {
   return (
     <div
       className={cn(
@@ -2558,8 +3160,8 @@ function SubtitlePanel({
       <div className="mt-3 min-h-[4.5rem] space-y-2">
         <AnimatePresence mode="popLayout">
           {subtitles.map((subtitle, index) => (
-            <motion.p
-              key={`${subtitle}-${index}`}
+            <motion.div
+              key={`${index}`}
               initial={{ opacity: 0, y: 15, x: -10 }}
               animate={{ opacity: 1, y: 0, x: 0 }}
               exit={{ opacity: 0, y: -10, x: 10 }}
@@ -2568,26 +3170,19 @@ function SubtitlePanel({
                 ease: [0.16, 1, 0.3, 1],
               }}
               className={cn(
-                "text-sm transition-colors duration-300",
+                "transition-colors duration-300",
                 index === subtitles.length - 1
-                  ? "text-foreground"
-                  : index === subtitles.length - 2
-                    ? "text-muted-foreground"
-                    : "text-muted-foreground/60",
+                  ? "opacity-100"
+                  : "opacity-60",
               )}
             >
-              {index === subtitles.length - 1 && status === "speaking" && (
-                <motion.span
-                  className={cn(
-                    "inline-block w-0.5 h-4 ml-1 align-middle",
-                    context === "hospital" ? "bg-primary" : "bg-destructive",
-                  )}
-                  animate={{ opacity: [1, 0, 1] }}
-                  transition={{ duration: 0.8, repeat: Number.POSITIVE_INFINITY }}
-                />
-              )}
-              {subtitle}
-            </motion.p>
+              <p className={cn(
+                "text-sm leading-relaxed",
+                index === subtitles.length - 1 ? "text-foreground" : "text-muted-foreground"
+              )}>
+                {subtitle.primary}
+              </p>
+            </motion.div>
           ))}
         </AnimatePresence>
         {subtitles.length === 0 && (

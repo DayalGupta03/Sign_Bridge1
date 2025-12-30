@@ -32,13 +32,16 @@
 
 export type TTSContext = "hospital" | "emergency"
 
+
 export interface TTSOptions {
   text: string
   context: TTSContext
+  variant?: "default" | "sweet"
   onStart?: () => void
   onEnd?: () => void
   onError?: (error: Error) => void
 }
+
 
 // ============================================================================
 // SPEECH SYNTHESIS MANAGER
@@ -73,9 +76,13 @@ class SpeechSynthesisManager {
   private isInitialized = false
 
   constructor() {
+    console.log("🔊 SpeechSynthesisManager initializing...")
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      console.log("✅ window.speechSynthesis found")
       this.synthesis = window.speechSynthesis
       this.isInitialized = true
+    } else {
+      console.log("❌ window.speechSynthesis NOT found")
     }
   }
 
@@ -133,6 +140,48 @@ class SpeechSynthesisManager {
   }
 
   /**
+   * GET VOICE FOR VARIANT
+   * 
+   * Selects appropriate voice based on requested variant.
+   */
+  private getVoiceForVariant(variant: "default" | "sweet" = "default"): SpeechSynthesisVoice | null {
+    if (!this.synthesis) return null
+    const voices = this.synthesis?.getVoices() || []
+    if (voices.length === 0) return null
+
+    if (variant === "sweet") {
+      // Strictly prioritize female voices with "sweet" characteristics
+      // 1. "Samantha" (macOS) - very distinct clean female voice
+      const samantha = voices.find(v => v.name.includes("Samantha"))
+      if (samantha) return samantha
+
+      // 2. "Zira" (Windows)
+      const zira = voices.find(v => v.name.includes("Zira"))
+      if (zira) return zira
+
+      // 3. "Google US English" - often high quality female
+      const googleFemale = voices.find(v => v.name === "Google US English")
+      if (googleFemale) return googleFemale
+
+      // 4. Any English Female voice
+      const female = voices.find(v =>
+        v.lang.startsWith("en") &&
+        v.name.toLowerCase().includes("female")
+      )
+      if (female) return female
+    }
+
+    // Fallback to standard selection logic
+    return this.getBestVoice()
+  }
+
+  /**
+   * ASK FOR PERMISSION TO SPEAK
+   * 
+   * ...
+   */
+
+  /**
    * SPEAK TEXT
    * 
    * Converts text to speech with context-aware parameters.
@@ -161,21 +210,26 @@ class SpeechSynthesisManager {
       return
     }
 
-    // Cancel any ongoing speech to prevent overlap
-    this.cancel()
+    // CRITICAL FIX: Do NOT auto-cancel here
+    // The caller controls whether to interrupt via isSpeaking() check
+    // This prevents the "canceled" error in deaf-to-hearing mode
 
     try {
       // Create new utterance
       const utterance = new SpeechSynthesisUtterance(options.text)
 
-      // Select best available voice
-      const voice = this.getBestVoice()
+      // Select voice based on variant
+      const voice = this.getVoiceForVariant(options.variant)
       if (voice) {
         utterance.voice = voice
       }
 
-      // Configure voice parameters based on context
-      if (options.context === "hospital") {
+      // Configure voice parameters based on context and variant
+      if (options.variant === "sweet") {
+        utterance.rate = 1.05 // Slightly faster for energy
+        utterance.pitch = 1.3 // Higher pitch for "girly" effect (sweet spot is 1.2-1.4)
+        utterance.volume = 1.0
+      } else if (options.context === "hospital") {
         // Hospital: Calm, reassuring, slightly slower
         utterance.rate = 0.9 // 10% slower than normal
         utterance.pitch = 1.0 // Neutral pitch
@@ -200,10 +254,10 @@ class SpeechSynthesisManager {
       }
 
       utterance.onerror = (event) => {
-        // "interrupted" is a control flow event, not an error
-        // It occurs when speech is intentionally stopped or replaced
-        if (event.error === "interrupted") {
-          console.debug("🔇 Speech interrupted (expected control flow)")
+        // "interrupted" and "canceled" are control flow events, not errors
+        // They occur when speech is intentionally stopped or replaced
+        if (event.error === "interrupted" || event.error === "canceled") {
+          console.debug(`🔇 Speech ${event.error} (expected control flow)`)
           this.currentUtterance = null
           return
         }

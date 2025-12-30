@@ -1,0 +1,28 @@
+{
+  "name": "signbridge-backend",
+  "version": "1.0.0",
+  "description": "Minimal production backend for SignBridge 3D - observability only",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "signbridge",
+    "observability",
+    "logging",
+    "health-check"
+  ],
+  "author": "SignBridge Team",
+  "license": "MIT",
+  "dependencies": {
+    "fastify": "^4.25.0",
+    "@fastify/cors": "^8.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -94,6 +94,31 @@ function getSessionId(): string {
 // ============================================================================
 
 /**
+ * HIPAA SAFEGUARD: REMOVE PHI FROM ANALYTICS
+ * 
+ * Recursively removes sensitive keys from objects before logging.
+ * Ensures no text content, names, or transcripts leave the browser.
+ */
+function scrubMetadata(metadata?: Record<string, any>): Record<string, any> | undefined {
+  if (!metadata) return undefined
+
+  const SENSITIVE_KEYS = ['text', 'transcript', 'input', 'message', 'translation', 'user_input']
+  const clean: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (SENSITIVE_KEYS.includes(key.toLowerCase())) {
+      clean[key] = '[REDACTED_PHI]'
+    } else if (typeof value === 'object' && value !== null) {
+      clean[key] = scrubMetadata(value)
+    } else {
+      clean[key] = value
+    }
+  }
+
+  return clean
+}
+
+/**
  * TRACK EVENT
  * 
  * Sends interaction event to backend for logging and analytics.
@@ -123,11 +148,16 @@ export function trackEvent(options: TrackEventOptions): void {
   }
 
   try {
+    // HIPAA SAFETY: Scrub potentially sensitive data from metadata
+    // We never want to log actual conversation text, only operational metrics
+    const scrubbedMetadata = scrubMetadata(options.metadata)
+
     // Prepare event payload
     const event = {
       sessionId: getSessionId(),
       timestamp: Date.now(),
       ...options,
+      metadata: scrubbedMetadata, // Use scrubbed version
     }
 
     // Send to backend (non-blocking, no await)
