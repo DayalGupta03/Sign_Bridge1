@@ -1,14 +1,15 @@
-# 🌉 SignBridge 3D
-### AI-Mediated Real-Time Communication for Healthcare
-
 <div align="center">
 
-**Breaking down communication barriers between Deaf and Hearing users in medical emergencies**
+# 🌉 SignBridge 3D
+
+### AI-Mediated Real-Time Communication for Healthcare
 
 [![HIPAA Ready](https://img.shields.io/badge/HIPAA-Ready-green?style=for-the-badge)](./BUSINESS_MODEL.md)
 [![ADA Compliant](https://img.shields.io/badge/ADA-Compliant-blue?style=for-the-badge)](#security-privacy--compliance)
 [![<200ms Latency](https://img.shields.io/badge/Latency-%3C200ms-orange?style=for-the-badge)](#system-architecture)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
+
+[![Watch Video Demo](https://img.shields.io/badge/▶️_Watch-Video_Demo-red?style=for-the-badge&logo=youtube)](https://youtu.be/iifFHXfSUCo)
 
 [Live Demo](#-live-demo) • [Architecture](#-system-architecture) • [Business Model](#-business-model--revenue-streams) • [Get Started](#-quick-start)
 
@@ -42,7 +43,11 @@ SignBridge provides **instant, private, AI-mediated communication** that:
 
 ## 🎥 Live Demo
 
-> https://youtu.be/iifFHXfSUCo
+<div align="center">
+
+[![Watch Video Demo](https://img.shields.io/badge/▶️_Watch-Video_Demo-red?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/iifFHXfSUCo)
+
+</div>
 
 ### Key Features in Action
 
@@ -154,24 +159,34 @@ sequenceDiagram
 
 ### Technology Stack
 
+<div align="center">
+
 #### Frontend & UI
-- **Next.js 16** (App Router) - React framework with server components
-- **React 19** - UI library with concurrent features
-- **TypeScript 5** - Type-safe development
-- **Tailwind CSS 4** - Utility-first styling with OKLCH color space
-- **Framer Motion 12** - GPU-accelerated animations (60fps)
-- **Radix UI** - Accessible component primitives
+<p>
+<img src="https://img.shields.io/badge/Next.js_16-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
+<img src="https://img.shields.io/badge/React_19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
+<img src="https://img.shields.io/badge/TypeScript_5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+<img src="https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
+<img src="https://img.shields.io/badge/Framer_Motion_12-0055FF?style=for-the-badge&logo=framer&logoColor=white" alt="Framer Motion" />
+<img src="https://img.shields.io/badge/Radix_UI-161618?style=for-the-badge&logo=radixui&logoColor=white" alt="Radix UI" />
+</p>
 
 #### AI & Media Processing
-- **Google Gemini AI** - Medical context understanding and NLP
-- **MediaPipe Hands** - Real-time hand tracking for sign language
-- **Web Speech API** - Browser-native speech recognition
-- **Web Speech Synthesis** - Natural text-to-speech output
+<p>
+<img src="https://img.shields.io/badge/Google_Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white" alt="Google Gemini" />
+<img src="https://img.shields.io/badge/MediaPipe-0097A7?style=for-the-badge&logo=google&logoColor=white" alt="MediaPipe" />
+<img src="https://img.shields.io/badge/Web_Speech_API-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Web Speech API" />
+<img src="https://img.shields.io/badge/Speech_Synthesis-FF6F00?style=for-the-badge&logo=google&logoColor=white" alt="Speech Synthesis" />
+</p>
 
 #### Development & Tooling
-- **pnpm** - Fast, disk-efficient package manager
-- **ESLint** - Code quality and consistency
-- **PostCSS** - CSS processing and optimization
+<p>
+<img src="https://img.shields.io/badge/pnpm-F69220?style=for-the-badge&logo=pnpm&logoColor=white" alt="pnpm" />
+<img src="https://img.shields.io/badge/ESLint-4B32C3?style=for-the-badge&logo=eslint&logoColor=white" alt="ESLint" />
+<img src="https://img.shields.io/badge/PostCSS-DD3A0A?style=for-the-badge&logo=postcss&logoColor=white" alt="PostCSS" />
+</p>
+
+</div>
 
 ---
 
@@ -617,25 +632,16 @@ vercel deploy
 
 ## 🤝 Team Vision & Future Expansion
 
- Team Members
+### Team Members
 
-Ayush Patel — Full Stack Developer
-🔗 GitHub: https://github.com/Ayush-patel9
-
-Kanav Kumar — Full Stack Developer
-🔗 GitHub: https://github.com/KINGKK-007
-
-Dayal Gupta — Backend Architect
-🔗 GitHub: https://github.com/DayalGupta03
-
-Pulkit Pandey — AI Engineer
-🔗 GitHub: https://github.com/COolAlien35
-
-Prisha Gupta — Frontend Specialist
-🔗 GitHub: https://github.com/Prisha4gupta
-
-Thrissha Arcot — UI/UX Designer
-🔗 GitHub: https://github.com/3sha-arcot
+| Name | Role | GitHub | LinkedIn |
+|------|------|--------|----------|
+| **Ayush Patel** | Full Stack Developer | [GitHub](https://github.com/Ayush-patel9) | [LinkedIn](https://www.linkedin.com/in/ayush-patel-72a037316/) |
+| **Kanav Kumar** | Full Stack Developer | [GitHub](https://github.com/KINGKK-007) | [LinkedIn](https://www.linkedin.com/in/kanavkumar007/) |
+| **Dayal Gupta** | Backend Architect | [GitHub](https://github.com/DayalGupta03) | [LinkedIn](https://www.linkedin.com/in/dayal-gupta18/) |
+| **Pulkit Pandey** | AI Engineer | [GitHub](https://github.com/COolAlien35) | [LinkedIn](https://www.linkedin.com/in/pulkit-pandey-b13076319/) |
+| **Prisha Gupta** | Frontend Specialist | [GitHub](https://github.com/Prisha4gupta) | [LinkedIn](https://www.linkedin.com/in/prishagupta4/) |
+| **Thrissha Arcot** | UI/UX Designer | [GitHub](https://github.com/3sha-arcot) | [LinkedIn](https://www.linkedin.com/in/thrisshaarcot/) |
 
 ### Partnership Opportunities
 
