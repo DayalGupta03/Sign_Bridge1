@@ -52,8 +52,7 @@ SignBridge provides **instant, private, AI-mediated communication** that:
 | 👋 **Sign Language Detection** | Computer vision-based gesture recognition (ASL/ISL) | ✅ Live |
 | 🤖 **AI Mediation** | Context-aware interpretation using Google Gemini AI | ✅ Live |
 | 🗣️ **Text-to-Speech** | Natural voice synthesis with urgency adaptation | ✅ Live |
-| 🎭 **3D Avatar** | Real-time signing avatar with lip-sync | 🔄 In Progress |
-| 📱 **Responsive UI** | Dark institutional theme optimized for medical environments | ✅ Live |
+|  **Responsive UI** | Dark institutional theme optimized for medical environments | ✅ Live |
 | 🚨 **Emergency Mode** | High-urgency context with accelerated processing | ✅ Live |
 
 ---
@@ -310,12 +309,8 @@ SignBridge is designed with healthcare-grade security from the ground up:
 | Requirement | Implementation | Status |
 |-------------|----------------|--------|
 | **Data Encryption (Transit)** | TLS 1.3 for all communications | ✅ Ready |
-| **Data Encryption (Rest)** | AES-256 for stored data | 🔄 In Progress |
-| **Audit Logging** | Comprehensive access logs | 🔄 In Progress |
-| **Access Controls** | Role-based authentication (RBAC) | 📋 Planned |
 | **Business Associate Agreement** | BAA templates prepared | ✅ Ready |
 | **Data Minimization** | No PII stored beyond session | ✅ Ready |
-| **Patient Consent** | Explicit consent flows | 📋 Planned |
 
 ### Privacy-First Architecture
 
@@ -627,22 +622,22 @@ vercel deploy
  Team Members
 
 Ayush Patel — Full Stack Developer
-🔗 GitHub: https://github.com/
+🔗 GitHub: https://github.com/Ayush-patel9
 
 Kanav Kumar — Full Stack Developer
-🔗 GitHub: https://github.com/
+🔗 GitHub: https://github.com/KINGKK-007
 
 Dayal Gupta — Backend Architect
-🔗 GitHub: https://github.com/
+🔗 GitHub: https://github.com/DayalGupta03
 
 Pulkit Pandey — AI Engineer
-🔗 GitHub: https://github.com/
+🔗 GitHub: https://github.com/COolAlien35
 
 Prisha Gupta — Frontend Specialist
-🔗 GitHub: https://github.com/
+🔗 GitHub: https://github.com/Prisha4gupta
 
-Thrissha Ar… — UI/UX Designer
-🔗 GitHub: https://github.com/
+Thrissha Arcot — UI/UX Designer
+🔗 GitHub: https://github.com/3sha-arcot
 
 ### Partnership Opportunities
 
